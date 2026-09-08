@@ -26,6 +26,14 @@
   --pos: var(--accent);
   --neg: var(--fg);
 
+  /* Semantic status colors, kept separate from the app accent. */
+  --info: #2f5e97; /* positive "left to assign": money waiting */
+  --info-weak: #e7edf6;
+  --warn: #a8412a; /* negative / over-assigned / over cap: needs attention */
+  --warn-weak: #f6e9e5;
+  --calm: #57756a; /* exactly zero: the calm goal state */
+  --calm-weak: #eaefec;
+
   --skeleton: #e9e8e3;
   --skeleton-shine: #f2f1ec;
 
@@ -47,6 +55,13 @@
     --accent: #57ab80;
     --accent-fg: #0d0f0d;
     --accent-weak: #1a2820;
+
+    --info: #7aa6dd;
+    --info-weak: #16202e;
+    --warn: #e0866f;
+    --warn-weak: #2a1a15;
+    --calm: #8fb0a3;
+    --calm-weak: #17211d;
 
     --skeleton: #232320;
     --skeleton-shine: #2c2c28;

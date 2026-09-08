@@ -1,6 +1,6 @@
-import { Link, NavLink, Outlet, useLocation, useMatch } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useMatch } from 'react-router-dom'
 
-import { addMonths, currentMonth, formatMonthLabel } from '../lib/month'
+import { currentMonth, formatMonthLabel } from '../lib/month'
 import { useAccounts } from '../lib/queries'
 import type { AccountKind, AccountRead } from '../lib/types'
 import { EmptyState, Money, SkeletonRows } from './ui'
@@ -70,36 +70,6 @@ function AccountBalances() {
   )
 }
 
-function MonthStepper({ month }: { month: string }) {
-  return (
-    <div className="flex items-center gap-1">
-      <Link
-        to={`/budget/${addMonths(month, -1)}`}
-        aria-label="Previous month"
-        className="rounded px-2 py-1 text-[var(--fg-muted)] hover:bg-[var(--row-hover)] hover:text-[var(--fg)]"
-      >
-        ‹
-      </Link>
-      <span className="w-40 text-center font-medium text-[var(--fg)]">
-        {formatMonthLabel(month)}
-      </span>
-      <Link
-        to={`/budget/${addMonths(month, 1)}`}
-        aria-label="Next month"
-        className="rounded px-2 py-1 text-[var(--fg-muted)] hover:bg-[var(--row-hover)] hover:text-[var(--fg)]"
-      >
-        ›
-      </Link>
-      <Link
-        to={`/budget/${currentMonth()}`}
-        className="ml-1 rounded px-2 py-1 text-[var(--fg-muted)] hover:bg-[var(--row-hover)] hover:text-[var(--fg)]"
-      >
-        Today
-      </Link>
-    </div>
-  )
-}
-
 export function Shell() {
   const location = useLocation()
   const budgetMatch = useMatch('/budget/:month')
@@ -149,15 +119,9 @@ export function Shell() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--border)] bg-[var(--panel)] px-5">
-          <div className="flex items-center gap-3">
-            {month ? (
-              <MonthStepper month={month} />
-            ) : (
-              <span className="font-medium capitalize text-[var(--fg)]">
-                {location.pathname.replace('/', '') || 'Budget'}
-              </span>
-            )}
-          </div>
+          <span className="font-medium capitalize text-[var(--fg)]">
+            {month ? formatMonthLabel(month) : location.pathname.replace('/', '') || 'Budget'}
+          </span>
         </header>
 
         <main className="min-h-0 flex-1 overflow-auto px-5 py-5">

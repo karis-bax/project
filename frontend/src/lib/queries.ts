@@ -31,6 +31,7 @@ import type {
   CategoryRead,
   CopyFromPreviousResponse,
   DeletedResponse,
+  GoalRead,
   HealthResponse,
   MonthBudget,
   TransactionCreate,
@@ -57,6 +58,7 @@ export const queryKeys = {
   transactions: (filters: TransactionFilters) =>
     ['transactions', filters] as const,
   budget: (month: string) => ['budget', month] as const,
+  goals: ['goals'] as const,
 }
 
 function buildQuery(params: Record<string, string | number | boolean | undefined>): string {
@@ -116,6 +118,13 @@ export function useBudget(month: string) {
     queryKey: queryKeys.budget(month),
     queryFn: () => api.get<MonthBudget>(`/budget/${month}`),
     enabled: Boolean(month),
+  })
+}
+
+export function useGoals() {
+  return useQuery({
+    queryKey: queryKeys.goals,
+    queryFn: () => api.get<GoalRead[]>('/goals'),
   })
 }
 
