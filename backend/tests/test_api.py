@@ -243,6 +243,74 @@ def test_transactions_bad_month_is_422(client: TestClient) -> None:
     assert client.get("/api/transactions?month=2026-13").status_code == 422
 
 
+def test_transactions_count_and_uncategorized(
+    client: TestClient, session: Session
+) -> None:
+    account, _group, category = seed_basics(session)
+    session.add_all(
+        [
+            Transaction(
+                account_id=account.id,
+                category_id=category.id,
+                date=date(2026, 1, 1),
+                payee="Publix",
+                amount_cents=-5000,
+            ),
+            Transaction(
+                account_id=account.id,
+                category_id=None,
+                date=date(2026, 1, 2),
+                payee="Payroll",
+                amount_cents=300000,
+            ),
+        ]
+    )
+    session.commit()
+
+    assert client.get("/api/transactions/count").json() == {"count": 2}
+    assert client.get("/api/transactions/count?uncategorized=true").json() == {
+        "count": 1
+    }
+    # Bad month on count is still 422, never 500.
+    assert client.get("/api/transactions/count?month=2026-13").status_code == 422
+
+
+def test_transactions_payees_suggestion(
+    client: TestClient, session: Session
+) -> None:
+    account, group, category = seed_basics(session)
+    other = Category(group_id=group.id, name="Dining", sort_order=1, archived=False)
+    session.add(other)
+    session.flush()
+    # Publix appears mostly under Groceries -> suggested category should be it.
+    for _ in range(3):
+        session.add(
+            Transaction(
+                account_id=account.id,
+                category_id=category.id,
+                date=date(2026, 1, 1),
+                payee="Publix",
+                amount_cents=-5000,
+            )
+        )
+    session.add(
+        Transaction(
+            account_id=account.id,
+            category_id=other.id,
+            date=date(2026, 1, 1),
+            payee="Publix",
+            amount_cents=-1000,
+        )
+    )
+    session.commit()
+
+    payees = client.get("/api/transactions/payees").json()
+    assert len(payees) == 1
+    assert payees[0]["payee"] == "Publix"
+    assert payees[0]["suggested_category_id"] == category.id
+    assert payees[0]["count"] == 4
+
+
 def test_bulk_categorize_bad_category_is_404(
     client: TestClient, session: Session
 ) -> None:

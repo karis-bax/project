@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatCents, parseDollars } from './money'
+import { formatCents, parseAmountInput, parseDollars } from './money'
 
 describe('parseDollars', () => {
   it('parses plain integers', () => {
@@ -70,5 +70,27 @@ describe('formatCents', () => {
     expect(formatCents(1250, { sign: true })).toBe('+$12.50')
     expect(formatCents(-4000, { sign: true })).toBe('-$40.00')
     expect(formatCents(0, { sign: true })).toBe('$0.00')
+  })
+})
+
+describe('parseAmountInput', () => {
+  it('defaults to an outflow (negative)', () => {
+    expect(parseAmountInput('12.50')).toBe(-1250)
+    expect(parseAmountInput('40')).toBe(-4000)
+    expect(parseAmountInput('1,234.56')).toBe(-123456)
+  })
+
+  it('treats a leading + as income (positive)', () => {
+    expect(parseAmountInput('+40')).toBe(4000)
+    expect(parseAmountInput('+1,234.56')).toBe(123456)
+  })
+
+  it('respects an explicit leading -', () => {
+    expect(parseAmountInput('-40')).toBe(-4000)
+  })
+
+  it('throws on invalid input', () => {
+    expect(() => parseAmountInput('')).toThrow()
+    expect(() => parseAmountInput('+')).toThrow()
   })
 })

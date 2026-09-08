@@ -196,6 +196,16 @@ class TransactionListResponse(BaseModel):
     next_cursor: str | None = None
 
 
+class CountResponse(BaseModel):
+    count: int
+
+
+class PayeeSuggestion(BaseModel):
+    payee: str
+    suggested_category_id: int | None = None
+    count: int
+
+
 class BulkCategorizeRequest(BaseModel):
     ids: list[int]
     category_id: int | None = None

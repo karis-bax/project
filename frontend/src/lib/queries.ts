@@ -30,10 +30,12 @@ import type {
   CategoryGroupWithCategories,
   CategoryRead,
   CopyFromPreviousResponse,
+  CountResponse,
   DeletedResponse,
   GoalRead,
   HealthResponse,
   MonthBudget,
+  PayeeSuggestion,
   TransactionCreate,
   TransactionListResponse,
   TransactionRead,
@@ -57,6 +59,9 @@ export const queryKeys = {
     ['categories', { includeArchived }] as const,
   transactions: (filters: TransactionFilters) =>
     ['transactions', filters] as const,
+  transactionsCount: (filters: TransactionFilters) =>
+    ['transactions', 'count', filters] as const,
+  payees: ['payees'] as const,
   budget: (month: string) => ['budget', month] as const,
   goals: ['goals'] as const,
 }
@@ -125,6 +130,21 @@ export function useGoals() {
   return useQuery({
     queryKey: queryKeys.goals,
     queryFn: () => api.get<GoalRead[]>('/goals'),
+  })
+}
+
+export function useTransactionsCount(filters: TransactionFilters = {}) {
+  return useQuery({
+    queryKey: queryKeys.transactionsCount(filters),
+    queryFn: () =>
+      api.get<CountResponse>(`/transactions/count${buildQuery({ ...filters })}`),
+  })
+}
+
+export function usePayees() {
+  return useQuery({
+    queryKey: queryKeys.payees,
+    queryFn: () => api.get<PayeeSuggestion[]>('/transactions/payees'),
   })
 }
 
@@ -255,6 +275,20 @@ export function useBulkCategorize() {
       qc.invalidateQueries({ queryKey: ['transactions'] })
       qc.invalidateQueries({ queryKey: ['budget'] })
     },
+  })
+}
+
+export function useMarkTransactionsCleared() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ ids, cleared }: { ids: number[]; cleared: boolean }) => {
+      await Promise.all(
+        ids.map((id) =>
+          api.patch<TransactionRead>(`/transactions/${id}`, { cleared }),
+        ),
+      )
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['transactions'] }),
   })
 }
 

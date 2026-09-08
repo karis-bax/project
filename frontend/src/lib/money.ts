@@ -55,3 +55,16 @@ export function parseDollars(input: string): number {
   const total = wholeCents + fracCents
   return negative ? -total : total
 }
+
+/**
+ * Parse a quick-add amount into signed integer cents. The default sign is
+ * negative (an outflow); a leading "+" marks an inflow (income). Accepts the
+ * same formatting as parseDollars ("12.50", "-40", "1,234.56", "+1,234.56").
+ */
+export function parseAmountInput(input: string): number {
+  const trimmed = input.trim()
+  const isIncome = trimmed.startsWith('+')
+  const body = isIncome || trimmed.startsWith('-') ? trimmed.slice(1) : trimmed
+  const magnitude = Math.abs(parseDollars(body))
+  return isIncome ? magnitude : -magnitude
+}

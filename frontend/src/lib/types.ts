@@ -164,6 +164,16 @@ export interface TransactionListResponse {
   next_cursor: string | null
 }
 
+export interface CountResponse {
+  count: number
+}
+
+export interface PayeeSuggestion {
+  payee: string
+  suggested_category_id: number | null
+  count: number
+}
+
 export interface BulkCategorizeRequest {
   ids: number[]
   category_id: number | null

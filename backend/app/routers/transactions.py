@@ -53,6 +53,84 @@ def _category_or_404(db: Session, category_id: int) -> Category:
     return category
 
 
+def _apply_filters(
+    stmt,
+    *,
+    month: str | None,
+    account_id: int | None,
+    category_id: int | None,
+    q: str | None,
+    uncategorized: bool | None,
+):
+    if month is not None:
+        validate_month(month)
+        stmt = stmt.where(func.strftime("%Y-%m", Transaction.date) == month)
+    if account_id is not None:
+        stmt = stmt.where(Transaction.account_id == account_id)
+    if category_id is not None:
+        stmt = stmt.where(Transaction.category_id == category_id)
+    if uncategorized:
+        stmt = stmt.where(Transaction.category_id.is_(None))
+    if q:
+        pattern = f"%{q}%"
+        stmt = stmt.where(
+            or_(Transaction.payee.ilike(pattern), Transaction.memo.ilike(pattern))
+        )
+    return stmt
+
+
+@router.get("/count", response_model=schemas.CountResponse)
+def count_transactions(
+    month: str | None = None,
+    account_id: int | None = None,
+    category_id: int | None = None,
+    q: str | None = None,
+    uncategorized: bool | None = None,
+    db: Session = Depends(get_db),
+) -> schemas.CountResponse:
+    stmt = _apply_filters(
+        select(func.count()).select_from(Transaction),
+        month=month,
+        account_id=account_id,
+        category_id=category_id,
+        q=q,
+        uncategorized=uncategorized,
+    )
+    return schemas.CountResponse(count=int(db.scalar(stmt) or 0))
+
+
+@router.get("/payees", response_model=list[schemas.PayeeSuggestion])
+def list_payees(db: Session = Depends(get_db)) -> list[schemas.PayeeSuggestion]:
+    # Count each (payee, category) pair, then pick the most-frequent category
+    # per payee as the suggestion.
+    rows = db.execute(
+        select(
+            Transaction.payee,
+            Transaction.category_id,
+            func.count().label("n"),
+        ).group_by(Transaction.payee, Transaction.category_id)
+    ).all()
+
+    totals: dict[str, int] = {}
+    best: dict[str, tuple[int, int | None]] = {}  # payee -> (count, category_id)
+    for payee, category_id, n in rows:
+        totals[payee] = totals.get(payee, 0) + n
+        current = best.get(payee)
+        if current is None or n > current[0]:
+            best[payee] = (n, category_id)
+
+    suggestions = [
+        schemas.PayeeSuggestion(
+            payee=payee,
+            suggested_category_id=best[payee][1],
+            count=total,
+        )
+        for payee, total in totals.items()
+    ]
+    suggestions.sort(key=lambda s: (-s.count, s.payee.lower()))
+    return suggestions
+
+
 @router.get("", response_model=schemas.TransactionListResponse)
 def list_transactions(
     month: str | None = None,
@@ -68,21 +146,14 @@ def list_transactions(
     stmt = select(Transaction).options(
         joinedload(Transaction.account), joinedload(Transaction.category)
     )
-
-    if month is not None:
-        validate_month(month)
-        stmt = stmt.where(func.strftime("%Y-%m", Transaction.date) == month)
-    if account_id is not None:
-        stmt = stmt.where(Transaction.account_id == account_id)
-    if category_id is not None:
-        stmt = stmt.where(Transaction.category_id == category_id)
-    if uncategorized:
-        stmt = stmt.where(Transaction.category_id.is_(None))
-    if q:
-        pattern = f"%{q}%"
-        stmt = stmt.where(
-            or_(Transaction.payee.ilike(pattern), Transaction.memo.ilike(pattern))
-        )
+    stmt = _apply_filters(
+        stmt,
+        month=month,
+        account_id=account_id,
+        category_id=category_id,
+        q=q,
+        uncategorized=uncategorized,
+    )
 
     if cursor is not None:
         cur_date, cur_id = _decode_cursor(cursor)
