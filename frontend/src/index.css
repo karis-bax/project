@@ -1,0 +1,106 @@
+@import "tailwindcss";
+
+/*
+ * Palette as CSS custom properties. Components reference these through
+ * Tailwind's arbitrary-value syntax, e.g. `bg-[var(--bg)] text-[var(--fg)]`.
+ * A single accent hue is reserved for positive / actionable states only.
+ * Light and dark are driven by prefers-color-scheme.
+ */
+:root {
+  --bg: #f6f6f4;
+  --panel: #fbfbf9;
+  --panel-raised: #ffffff;
+  --fg: #1b1b19;
+  --fg-muted: #6c6b64;
+  --fg-subtle: #9b9a92;
+  --border: #e6e5e0;
+  --border-strong: #d6d5cf;
+  --row-hover: #efeee9;
+
+  /* Single accent hue — positive / actionable only. */
+  --accent: #2f6f4f;
+  --accent-fg: #ffffff;
+  --accent-weak: #e5efe9;
+
+  /* Numbers: positives use the accent; negatives stay quiet (plain text). */
+  --pos: var(--accent);
+  --neg: var(--fg);
+
+  --skeleton: #e9e8e3;
+  --skeleton-shine: #f2f1ec;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121211;
+    --panel: #191917;
+    --panel-raised: #201f1d;
+    --fg: #e9e8e3;
+    --fg-muted: #9c9b90;
+    --fg-subtle: #6b6a62;
+    --border: #2a2a26;
+    --border-strong: #38372f;
+    --row-hover: #201f1d;
+
+    --accent: #57ab80;
+    --accent-fg: #0d0f0d;
+    --accent-weak: #1a2820;
+
+    --skeleton: #232320;
+    --skeleton-shine: #2c2c28;
+
+    color-scheme: dark;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Numbers that stack in a column use tabular figures for clean alignment. */
+.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+@keyframes skeleton-pulse {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton {
+  background-image: linear-gradient(
+    90deg,
+    var(--skeleton) 0%,
+    var(--skeleton-shine) 50%,
+    var(--skeleton) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+  border-radius: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
