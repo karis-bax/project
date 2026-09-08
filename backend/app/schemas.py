@@ -171,3 +171,84 @@ class GoalCreate(GoalBase):
 
 class GoalRead(ORMModel, TimestampsMixin, GoalBase):
     id: int
+
+
+# --- API responses / requests ---------------------------------------------
+
+
+class HealthResponse(BaseModel):
+    status: str
+    time: dt.datetime
+
+
+class CategoryGroupWithCategories(ORMModel, TimestampsMixin, CategoryGroupBase):
+    id: int
+    categories: list[CategoryRead]
+
+
+class TransactionWithRelations(TransactionRead):
+    account: AccountRead
+    category: CategoryRead | None = None
+
+
+class TransactionListResponse(BaseModel):
+    items: list[TransactionWithRelations]
+    next_cursor: str | None = None
+
+
+class BulkCategorizeRequest(BaseModel):
+    ids: list[int]
+    category_id: int | None = None
+
+
+class BulkCategorizeResponse(BaseModel):
+    updated: int
+
+
+class DeletedResponse(BaseModel):
+    id: int
+    deleted: bool
+
+
+class GroupReorderRequest(BaseModel):
+    group_ids: list[int]
+
+
+class AllocationUpsertRequest(BaseModel):
+    amount_cents: int
+
+
+class CopyFromPreviousResponse(BaseModel):
+    month: str
+    source_month: str
+    copied: int
+
+
+# Budget month-view response models (mirror ``budget.py`` dataclasses).
+
+
+class CategoryBudgetRow(ORMModel):
+    id: int
+    name: str
+    assigned_cents: int
+    activity_cents: int
+    available_cents: int
+
+
+class GroupBudget(ORMModel):
+    id: int
+    name: str
+    categories: list[CategoryBudgetRow]
+    assigned_cents: int
+    activity_cents: int
+    available_cents: int
+
+
+class MonthBudget(ORMModel):
+    month: str
+    groups: list[GroupBudget]
+    income_cents: int
+    assigned_cents: int
+    activity_cents: int
+    available_cents: int
+    left_to_assign_cents: int

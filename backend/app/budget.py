@@ -101,6 +101,12 @@ def _next_month(month: str) -> str:
     return f"{year:04d}-{mon:02d}"
 
 
+def previous_month(month: str) -> str:
+    """Public helper: the ``YYYY-MM`` month before ``month``."""
+
+    return _prev_month(month)
+
+
 def _month_range(start: str, end: str) -> list[str]:
     """Contiguous ``YYYY-MM`` months from ``start`` to ``end`` inclusive."""
 
