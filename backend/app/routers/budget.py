@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from .. import budget as budget_engine
@@ -41,20 +42,25 @@ def upsert_allocation(
     db: Session = Depends(get_db),
 ) -> Allocation:
     _category_or_404(db, category_id)
+    # Atomic upsert: a non-atomic select-then-insert races when two writes for
+    # the same not-yet-existing (month, category) arrive together (e.g. rapid
+    # keyboard assigning), both insert, and one hits the UNIQUE constraint.
+    stmt = sqlite_insert(Allocation).values(
+        month=month,
+        category_id=category_id,
+        amount_cents=payload.amount_cents,
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[Allocation.month, Allocation.category_id],
+        set_={"amount_cents": payload.amount_cents, "updated_at": func.now()},
+    )
+    db.execute(stmt)
+    db.commit()
     allocation = db.scalar(
         select(Allocation).where(
             Allocation.month == month, Allocation.category_id == category_id
         )
     )
-    if allocation is None:
-        allocation = Allocation(
-            month=month, category_id=category_id, amount_cents=payload.amount_cents
-        )
-        db.add(allocation)
-    else:
-        allocation.amount_cents = payload.amount_cents
-    db.commit()
-    db.refresh(allocation)
     return allocation
 
 

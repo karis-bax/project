@@ -328,6 +328,27 @@ def test_budget_bad_month_is_422(client: TestClient) -> None:
     assert client.get("/api/budget/2026-13").status_code == 422
 
 
+def test_allocation_upsert_updates_existing(client: TestClient, session: Session) -> None:
+    _account, _group, category = seed_basics(session)
+
+    first = client.put(
+        f"/api/budget/2026-01/allocations/{category.id}",
+        json={"amount_cents": 25000},
+    )
+    assert first.status_code == 200
+    assert first.json()["amount_cents"] == 25000
+
+    # A second PUT for the same (month, category) must update, not 500 on the
+    # UNIQUE constraint (atomic upsert / on-conflict path).
+    second = client.put(
+        f"/api/budget/2026-01/allocations/{category.id}",
+        json={"amount_cents": 30000},
+    )
+    assert second.status_code == 200
+    assert second.json()["amount_cents"] == 30000
+    assert second.json()["id"] == first.json()["id"]
+
+
 # --- goals -----------------------------------------------------------------
 
 
