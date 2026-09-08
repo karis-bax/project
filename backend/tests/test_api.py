@@ -22,6 +22,8 @@ from app.models import (
     Allocation,
     Category,
     CategoryGroup,
+    Goal,
+    GoalKind,
     Transaction,
 )
 
@@ -324,3 +326,30 @@ def test_budget_happy_path(client: TestClient, session: Session) -> None:
 
 def test_budget_bad_month_is_422(client: TestClient) -> None:
     assert client.get("/api/budget/2026-13").status_code == 422
+
+
+# --- goals -----------------------------------------------------------------
+
+
+def test_goals_happy_path(client: TestClient, session: Session) -> None:
+    _account, _group, category = seed_basics(session)
+    session.add(
+        Goal(
+            category_id=category.id,
+            kind=GoalKind.spending_cap,
+            target_cents=80000,
+            target_month=None,
+        )
+    )
+    session.commit()
+
+    resp = client.get("/api/goals")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["category_id"] == category.id
+    assert body[0]["kind"] == "spending_cap"
+
+    filtered = client.get(f"/api/goals?category_id={category.id}")
+    assert len(filtered.json()) == 1
+    assert client.get("/api/goals?category_id=9999").json() == []

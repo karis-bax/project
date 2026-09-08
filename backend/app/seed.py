@@ -28,6 +28,7 @@ from .models import (
     CategoryGroup,
     CategoryRule,
     Goal,
+    GoalKind,
     Transaction,
 )
 
@@ -280,12 +281,37 @@ def _load_transactions(db: Session, txns: list[dict]) -> int:
     return created
 
 
+# Demo goals: (Group/Category, kind, target dollars).
+_GOALS: list[tuple[str, GoalKind, int]] = [
+    ("Savings/Emergency Fund", GoalKind.savings_target, 10_000),
+    ("Savings/Vacation Fund", GoalKind.savings_target, 3_000),
+    ("Food/Groceries", GoalKind.spending_cap, 800),
+    ("Food/Restaurants", GoalKind.spending_cap, 450),
+    ("Fun/Entertainment", GoalKind.spending_cap, 300),
+]
+
+
+def _ensure_goals(db: Session, categories: dict[str, Category]) -> None:
+    for cat_key, kind, target_dollars in _GOALS:
+        category = categories.get(cat_key)
+        if category is None:
+            continue
+        get_or_create(
+            db,
+            Goal,
+            defaults={"target_cents": _dollars(target_dollars), "target_month": None},
+            category_id=category.id,
+            kind=kind,
+        )
+
+
 def run_seed(db: Session) -> dict[str, int]:
     """Populate the database with demo data. Idempotent."""
 
     accounts, categories = _ensure_reference_data(db)
     txns = _build_transactions(accounts, categories)
     created = _load_transactions(db, txns)
+    _ensure_goals(db, categories)
     db.commit()
     return {"transactions_created": created, "transactions_generated": len(txns)}
 
