@@ -6,6 +6,7 @@ import { api } from '../../lib/api'
 import { formatCents, parseDollars } from '../../lib/money'
 import { queryKeys } from '../../lib/queries'
 import { useCollapsedGroups } from '../../lib/useCollapsedGroups'
+import { neighborId } from './gridNav'
 import type {
   CategoryBudgetRow,
   GoalRead,
@@ -58,7 +59,7 @@ function AssignedCell({
   category: CategoryBudgetRow
   registerRef: (id: number, el: HTMLInputElement | null) => void
   onCommit: (category: CategoryBudgetRow, cents: number) => void
-  onNavigate: (id: number, direction: 1 | -1) => void
+  onNavigate: (id: number, direction: 1 | -1) => boolean
 }) {
   const [draft, setDraft] = useState<string | null>(null)
   const editing = draft !== null
@@ -100,11 +101,14 @@ function AssignedCell({
             commit()
             onNavigate(category.id, 1)
             break
-          case 'Tab':
-            e.preventDefault()
+          case 'Tab': {
+            // Commit, then move within the grid only if there IS a neighbour.
+            // At the first/last cell let Tab/Shift+Tab leave the grid (no trap).
             commit()
-            onNavigate(category.id, e.shiftKey ? -1 : 1)
+            const moved = onNavigate(category.id, e.shiftKey ? -1 : 1)
+            if (moved) e.preventDefault()
             break
+          }
           case 'ArrowDown':
             e.preventDefault()
             commit()
@@ -244,11 +248,11 @@ export function EnvelopeGrid({
   }, [])
 
   const focusRelative = useCallback(
-    (id: number, direction: 1 | -1) => {
-      const index = visibleIds.indexOf(id)
-      if (index === -1) return
-      const next = visibleIds[index + direction]
-      if (next !== undefined) inputRefs.current.get(next)?.focus()
+    (id: number, direction: 1 | -1): boolean => {
+      const next = neighborId(visibleIds, id, direction)
+      if (next === undefined) return false
+      inputRefs.current.get(next)?.focus()
+      return true
     },
     [visibleIds],
   )
@@ -328,7 +332,7 @@ function GroupSection({
   goalByCategory: Map<number, GoalRead>
   registerRef: (id: number, el: HTMLInputElement | null) => void
   onCommit: (category: CategoryBudgetRow, cents: number) => void
-  onNavigate: (id: number, direction: 1 | -1) => void
+  onNavigate: (id: number, direction: 1 | -1) => boolean
 }) {
   return (
     <div className="border-b border-[var(--border)] last:border-b-0">

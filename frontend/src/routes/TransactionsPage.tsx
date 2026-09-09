@@ -1,4 +1,4 @@
-import { useMemo, useState, type MouseEvent } from 'react'
+import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import { ApiError } from '../lib/api'
@@ -9,7 +9,7 @@ import {
 } from '../lib/queries'
 import { EmptyState, ErrorState, SkeletonRows } from '../components/ui'
 import { FilterBar } from '../components/transactions/FilterBar'
-import { Register } from '../components/transactions/Register'
+import { Register, type ActivateModifiers } from '../components/transactions/Register'
 import { SelectionBar } from '../components/transactions/SelectionBar'
 
 function readFilters(params: URLSearchParams): TransactionFilters {
@@ -61,13 +61,13 @@ export function TransactionsPage() {
 
   const clearFilters = () => setFilters({})
 
-  const onActivate = (id: number, index: number, e: MouseEvent) => {
-    if (e.shiftKey && anchorIndex !== null) {
+  const onActivate = (id: number, index: number, mods: ActivateModifiers) => {
+    if (mods.shift && anchorIndex !== null) {
       const [lo, hi] = [anchorIndex, index].sort((a, b) => a - b)
       setSelectedIds(new Set(items.slice(lo, hi + 1).map((t) => t.id)))
       return
     }
-    if (e.metaKey || e.ctrlKey) {
+    if (mods.meta) {
       setSelectedIds((prev) => {
         const next = new Set(prev)
         if (next.has(id)) next.delete(id)

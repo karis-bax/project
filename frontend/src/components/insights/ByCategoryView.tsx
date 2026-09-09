@@ -40,6 +40,20 @@ function SpendChart({
         margin={{ top: 4, right: 24, bottom: 16, left: 8 }}
         barGap={2}
       >
+        <defs>
+          {/* Diagonal hatch so the reference (prior month) bar is distinct from
+              the current month by pattern + outline, not colour alone. */}
+          <pattern
+            id="ref-hatch"
+            width="5"
+            height="5"
+            patternTransform="rotate(45)"
+            patternUnits="userSpaceOnUse"
+          >
+            <rect width="5" height="5" fill={theme.panel} />
+            <line x1="0" y1="0" x2="0" y2="5" stroke={theme.subtle} strokeWidth="2" />
+          </pattern>
+        </defs>
         <CartesianGrid horizontal={false} stroke={theme.grid} />
         <XAxis
           type="number"
@@ -74,7 +88,13 @@ function SpendChart({
             name === 'spent' ? 'This month' : compareLabel,
           ]}
         />
-        <Bar dataKey="compare" fill={theme.subtle} fillOpacity={0.35} name="compare" />
+        <Bar
+          dataKey="compare"
+          fill="url(#ref-hatch)"
+          stroke={theme.subtle}
+          strokeWidth={1}
+          name="compare"
+        />
         <Bar
           dataKey="spent"
           fill={theme.accent}
@@ -118,6 +138,25 @@ export function ByCategoryView({ month }: { month: string }) {
 
   return (
     <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-4 text-[12px] text-[var(--fg-muted)]">
+        <span className="flex items-center gap-1.5">
+          <span
+            className="inline-block h-3 w-4 rounded-sm"
+            style={{ background: theme.accent }}
+          />
+          {formatMonthLabel(month)} (this month)
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span
+            className="inline-block h-3 w-4 rounded-sm border"
+            style={{
+              borderColor: theme.subtle,
+              backgroundImage: `repeating-linear-gradient(45deg, ${theme.subtle} 0 1.5px, transparent 1.5px 4px)`,
+            }}
+          />
+          {compareLabel} (reference)
+        </span>
+      </div>
       <SpendChart
         data={groupData}
         theme={theme}
