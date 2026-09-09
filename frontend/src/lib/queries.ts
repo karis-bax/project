@@ -40,11 +40,15 @@ import type {
   ImportCommitRow,
   ImportMapping,
   ImportPreviewResponse,
+  BurnResponse,
+  ByCategoryResponse,
   MonthBudget,
   PayeeSuggestion,
+  RecurringResponse,
   RuleApplyResponse,
   SyncAccountStatus,
   SyncRunRead,
+  TrendsResponse,
   TransactionCreate,
   TransactionListResponse,
   TransactionRead,
@@ -76,6 +80,11 @@ export const queryKeys = {
   rules: ['rules'] as const,
   syncAccounts: ['sync', 'accounts'] as const,
   syncRuns: ['sync', 'runs'] as const,
+  insightsByCategory: (month: string, compareTo?: string) =>
+    ['insights', 'by-category', month, compareTo ?? null] as const,
+  insightsTrends: (months: number) => ['insights', 'trends', months] as const,
+  insightsBurn: (month: string) => ['insights', 'burn', month] as const,
+  insightsRecurring: ['insights', 'recurring'] as const,
 }
 
 function buildQuery(params: Record<string, string | number | boolean | undefined>): string {
@@ -482,5 +491,41 @@ export function useRunSync() {
       qc.invalidateQueries({ queryKey: ['transactions'] })
       qc.invalidateQueries({ queryKey: ['budget'] })
     },
+  })
+}
+
+// --- Insights --------------------------------------------------------------
+
+export function useInsightsByCategory(month: string, compareTo?: string) {
+  return useQuery({
+    queryKey: queryKeys.insightsByCategory(month, compareTo),
+    queryFn: () =>
+      api.get<ByCategoryResponse>(
+        `/insights/by-category${buildQuery({ month, compare_to: compareTo })}`,
+      ),
+    enabled: Boolean(month),
+  })
+}
+
+export function useInsightsTrends(months = 6) {
+  return useQuery({
+    queryKey: queryKeys.insightsTrends(months),
+    queryFn: () =>
+      api.get<TrendsResponse>(`/insights/trends${buildQuery({ months })}`),
+  })
+}
+
+export function useInsightsBurn(month: string) {
+  return useQuery({
+    queryKey: queryKeys.insightsBurn(month),
+    queryFn: () => api.get<BurnResponse>(`/insights/burn${buildQuery({ month })}`),
+    enabled: Boolean(month),
+  })
+}
+
+export function useInsightsRecurring() {
+  return useQuery({
+    queryKey: queryKeys.insightsRecurring,
+    queryFn: () => api.get<RecurringResponse>('/insights/recurring'),
   })
 }

@@ -316,3 +316,86 @@ export interface SyncRunRead {
   updated: number
   errors: unknown[]
 }
+
+// --- Insights --------------------------------------------------------------
+
+export interface CategorySpend {
+  id: number
+  name: string
+  spent_cents: number
+  compare_cents: number
+}
+
+export interface GroupSpend {
+  id: number
+  name: string
+  spent_cents: number
+  compare_cents: number
+  categories: CategorySpend[]
+}
+
+export interface ByCategoryResponse {
+  month: string
+  compare_to: string
+  total_spent_cents: number
+  total_compare_cents: number
+  groups: GroupSpend[]
+}
+
+export interface TrendPoint {
+  month: string
+  spent_cents: number
+}
+
+export interface TrendCategory {
+  id: number
+  name: string
+  points: TrendPoint[]
+  current_month: string
+  mean_cents: number
+  stddev_cents: number
+  is_outlier: boolean
+  reason: string | null
+}
+
+export interface TrendsResponse {
+  months: string[]
+  categories: TrendCategory[]
+}
+
+export interface BurnPoint {
+  day: number
+  cumulative_cents: number
+}
+
+export interface BurnSeries {
+  month: string
+  points: BurnPoint[]
+}
+
+export interface BurnResponse {
+  month: string
+  days_in_month: number
+  as_of_day: number
+  current: BurnPoint[]
+  history: BurnSeries[]
+  projected_total_cents: number | null
+  assumption: string
+}
+
+export interface RecurringItem {
+  payee: string
+  category_id: number | null
+  category_name: string | null
+  average_amount_cents: number
+  cadence_days: number
+  occurrences: number
+  last_date: string
+  next_expected_date: string
+  next_expected_amount_cents: number
+}
+
+export interface RecurringResponse {
+  items: RecurringItem[]
+  total_committed_monthly_cents: number
+}

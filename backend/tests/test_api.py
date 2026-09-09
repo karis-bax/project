@@ -447,6 +447,121 @@ def test_import_preview_bad_account_is_404(client: TestClient) -> None:
     assert resp.status_code == 404
 
 
+# --- insights --------------------------------------------------------------
+
+
+def _seed_for_insights(session: Session):
+    account, group, category = seed_basics(session)
+    other = Category(group_id=group.id, name="Dining", sort_order=1, archived=False)
+    session.add(other)
+    session.flush()
+    # Two months of spending for the same categories, plus a monthly bill.
+    for m, day in ((1, 5), (2, 5), (3, 5)):
+        session.add(
+            Transaction(
+                account_id=account.id,
+                category_id=category.id,
+                date=date(2026, m, day),
+                payee="Rocket Mortgage",
+                amount_cents=-215000,
+            )
+        )
+    session.add_all(
+        [
+            Transaction(
+                account_id=account.id,
+                category_id=category.id,
+                date=date(2026, 3, 10),
+                payee="Publix",
+                amount_cents=-8000,
+            ),
+            Transaction(
+                account_id=account.id,
+                category_id=other.id,
+                date=date(2026, 2, 12),
+                payee="Restaurant",
+                amount_cents=-5000,
+            ),
+            # Uncategorized income should be excluded from spend views.
+            Transaction(
+                account_id=account.id,
+                category_id=None,
+                date=date(2026, 3, 1),
+                payee="Payroll",
+                amount_cents=300000,
+            ),
+        ]
+    )
+    session.commit()
+    return account, group, category, other
+
+
+def test_insights_by_category(client: TestClient, session: Session) -> None:
+    _seed_for_insights(session)
+    resp = client.get("/api/insights/by-category?month=2026-03&compare_to=2026-02")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["month"] == "2026-03"
+    assert body["compare_to"] == "2026-02"
+    # March spend = 215000 + 8000 = 223000; income excluded.
+    assert body["total_spent_cents"] == 223000
+    assert body["groups"]  # non-empty
+    # Bad month -> 422, never 500.
+    assert client.get("/api/insights/by-category?month=2026-13").status_code == 422
+
+
+def test_insights_trends(client: TestClient, session: Session) -> None:
+    from app.insights import add_month, current_month
+
+    account, _group, category = seed_basics(session)
+    cur = current_month()
+    for k in range(3):  # spend in each of the last three months
+        m = add_month(cur, -k)
+        year, month = int(m[:4]), int(m[5:7])
+        session.add(
+            Transaction(
+                account_id=account.id,
+                category_id=category.id,
+                date=date(year, month, 5),
+                payee="Netflix",
+                amount_cents=-2000 * (k + 1),
+            )
+        )
+    session.commit()
+
+    resp = client.get("/api/insights/trends?months=6")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["months"]) == 6
+    assert body["categories"]
+    assert all("points" in c and len(c["points"]) == 6 for c in body["categories"])
+
+
+def test_insights_burn(client: TestClient, session: Session) -> None:
+    _seed_for_insights(session)
+    resp = client.get("/api/insights/burn?month=2026-03")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["days_in_month"] == 31
+    assert body["current"]  # cumulative points
+    assert len(body["history"]) == 3
+    assert body["assumption"]
+
+
+def test_insights_recurring(client: TestClient, session: Session) -> None:
+    _seed_for_insights(session)
+    resp = client.get("/api/insights/recurring")
+    assert resp.status_code == 200
+    body = resp.json()
+    # Rocket Mortgage repeats monthly at a fixed amount -> detected.
+    payees = [i["payee"] for i in body["items"]]
+    assert "Rocket Mortgage" in payees
+    mortgage = next(i for i in body["items"] if i["payee"] == "Rocket Mortgage")
+    assert mortgage["average_amount_cents"] == -215000
+    assert mortgage["occurrences"] == 3
+    assert body["total_committed_monthly_cents"] >= 215000
+
+
 def test_bulk_categorize_bad_category_is_404(
     client: TestClient, session: Session
 ) -> None:

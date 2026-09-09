@@ -12,6 +12,7 @@ from .routers import (
     goals,
     health,
     imports,
+    insights,
     rules,
     sync,
     transactions,
@@ -36,3 +37,4 @@ app.include_router(goals.router)
 app.include_router(rules.router)
 app.include_router(imports.router)
 app.include_router(sync.router)
+app.include_router(insights.router)
