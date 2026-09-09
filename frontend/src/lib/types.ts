@@ -289,3 +289,30 @@ export interface ImportCommitResponse {
 export interface RuleApplyResponse {
   changed: number
 }
+
+// --- Bank sync -------------------------------------------------------------
+
+export interface SyncAccountStatus {
+  external_id: string
+  name: string
+  org_name: string
+  currency: string
+  reported_balance_cents: number | null
+  balance_date: string | null
+  linked_account_id: number | null
+  local_account_name: string | null
+  computed_balance_cents: number | null
+  last_synced_at: string | null
+  mismatch: boolean
+}
+
+export interface SyncRunRead {
+  id: number
+  started_at: string
+  finished_at: string | null
+  status: 'ok' | 'partial' | 'failed'
+  accounts_synced: number
+  added: number
+  updated: number
+  errors: unknown[]
+}

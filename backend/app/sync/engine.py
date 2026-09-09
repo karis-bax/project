@@ -1,0 +1,171 @@
+"""Sync upsert engine (operates on a Session; provider-agnostic).
+
+Rules enforced here:
+1. Callers request an overlapping window (see the router); this module simply
+   upserts whatever it is given.
+2. Upsert on (account_id, external_id) — an existing row is updated, never
+   duplicated.
+3. Pending -> posted: id match updates in place; a new posted txn with no id
+   match is reconciled against a recent pending row (<=5 days, within 20% on
+   amount, similar description) and updates THAT row, keeping its category; a
+   pending row older than 14 days that never posted is deleted.
+4. Sync owns amount, date, description and pending. It never overwrites the
+   category or memo the user assigned.
+5. Category rules run only against newly inserted rows.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from ..importer import normalize_payee
+from ..models import Account, CategoryRule, Transaction, TxnSource
+from ..rules_engine import Rule, propose_category, sort_rules
+from .base import NormalizedAccount, NormalizedTxn
+
+_PENDING_MATCH_DAYS = 5
+_STALE_PENDING_DAYS = 14
+
+
+@dataclass
+class ApplyResult:
+    accounts_synced: int = 0
+    added: int = 0
+    updated: int = 0
+    deleted: int = 0
+
+
+def _load_rules(db: Session) -> list[Rule]:
+    return sort_rules(
+        [
+            Rule(
+                match_field=r.match_field.value,
+                pattern=r.pattern,
+                category_id=r.category_id,
+                priority=r.priority,
+            )
+            for r in db.scalars(select(CategoryRule))
+        ]
+    )
+
+
+def _similar_description(a: str, b: str) -> bool:
+    na, nb = normalize_payee(a), normalize_payee(b)
+    if not na or not nb:
+        return False
+    return na == nb or na in nb or nb in na
+
+
+def _within_20_percent(new_cents: int, pending_cents: int) -> bool:
+    # |Δ| <= 20% of the pending amount, using integer math (20% == 1/5).
+    return abs(abs(new_cents) - abs(pending_cents)) * 5 <= abs(pending_cents)
+
+
+def _apply_sync_fields(row: Transaction, nt: NormalizedTxn) -> None:
+    # Sync owns these; category and memo are left untouched (user-owned).
+    row.amount_cents = nt.amount_cents
+    row.date = nt.posted_date
+    row.payee = nt.description
+    row.pending = nt.pending
+
+
+def _find_pending_match(
+    candidates: list[Transaction], nt: NormalizedTxn, matched: set[int]
+) -> Transaction | None:
+    best: Transaction | None = None
+    best_delta = None
+    for row in candidates:
+        if row.id in matched or not row.pending or row.source != TxnSource.sync:
+            continue
+        if abs((nt.posted_date - row.date).days) > _PENDING_MATCH_DAYS:
+            continue
+        if not _within_20_percent(nt.amount_cents, row.amount_cents):
+            continue
+        if not _similar_description(nt.description, row.payee):
+            continue
+        delta = abs(abs(nt.amount_cents) - abs(row.amount_cents))
+        if best is None or delta < best_delta:
+            best, best_delta = row, delta
+    return best
+
+
+def apply(
+    db: Session,
+    accounts: list[NormalizedAccount],
+    now: datetime | None = None,
+) -> ApplyResult:
+    now = now or datetime.now()
+    today = now.date()
+    rules = _load_rules(db)
+    result = ApplyResult()
+
+    for na in accounts:
+        local = db.scalar(
+            select(Account).where(
+                Account.sync_source == "simplefin",
+                Account.external_id == na.external_id,
+            )
+        )
+        if local is None:
+            continue  # discovered but not linked yet
+        result.accounts_synced += 1
+
+        existing = list(
+            db.scalars(select(Transaction).where(Transaction.account_id == local.id))
+        )
+        by_ext = {t.external_id: t for t in existing if t.external_id}
+        matched: set[int] = set()
+
+        for nt in na.transactions:
+            row = by_ext.get(nt.external_id)
+            if row is not None:
+                _apply_sync_fields(row, nt)
+                if row.id is not None:
+                    matched.add(row.id)
+                result.updated += 1
+                continue
+
+            if not nt.pending:
+                candidate = _find_pending_match(existing, nt, matched)
+                if candidate is not None:
+                    # Pending posted (possibly under a new id, changed amount).
+                    candidate.external_id = nt.external_id
+                    _apply_sync_fields(candidate, nt)
+                    by_ext[nt.external_id] = candidate
+                    if candidate.id is not None:
+                        matched.add(candidate.id)
+                    result.updated += 1
+                    continue
+
+            new_row = Transaction(
+                account_id=local.id,
+                external_id=nt.external_id,
+                date=nt.posted_date,
+                payee=nt.description,
+                amount_cents=nt.amount_cents,
+                memo="",
+                cleared=not nt.pending,
+                pending=nt.pending,
+                source=TxnSource.sync,
+                category_id=propose_category(rules, nt.description, ""),
+            )
+            db.add(new_row)
+            existing.append(new_row)
+            by_ext[nt.external_id] = new_row
+            result.added += 1
+
+        # Delete pending sync rows that never posted and are now stale.
+        cutoff = today - timedelta(days=_STALE_PENDING_DAYS)
+        for t in existing:
+            if t.source == TxnSource.sync and t.pending and t.date < cutoff:
+                db.delete(t)
+                result.deleted += 1
+
+        local.last_synced_at = now
+
+    db.flush()
+    return result

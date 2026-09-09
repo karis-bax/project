@@ -43,6 +43,8 @@ import type {
   MonthBudget,
   PayeeSuggestion,
   RuleApplyResponse,
+  SyncAccountStatus,
+  SyncRunRead,
   TransactionCreate,
   TransactionListResponse,
   TransactionRead,
@@ -72,6 +74,8 @@ export const queryKeys = {
   budget: (month: string) => ['budget', month] as const,
   goals: ['goals'] as const,
   rules: ['rules'] as const,
+  syncAccounts: ['sync', 'accounts'] as const,
+  syncRuns: ['sync', 'runs'] as const,
 }
 
 function buildQuery(params: Record<string, string | number | boolean | undefined>): string {
@@ -421,6 +425,60 @@ export function useApplyRules() {
         `/rules/apply${month ? `?month=${month}` : ''}`,
       ),
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['transactions'] })
+      qc.invalidateQueries({ queryKey: ['budget'] })
+    },
+  })
+}
+
+// --- Bank sync -------------------------------------------------------------
+
+export function useSyncAccounts() {
+  return useQuery({
+    queryKey: queryKeys.syncAccounts,
+    queryFn: () => api.get<SyncAccountStatus[]>('/sync/accounts'),
+  })
+}
+
+export function useSyncRuns() {
+  return useQuery({
+    queryKey: queryKeys.syncRuns,
+    queryFn: () => api.get<SyncRunRead[]>('/sync/runs'),
+  })
+}
+
+export function useClaimSetupToken() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (setupToken: string) =>
+      api.post<SyncAccountStatus[]>('/sync/claim', { setup_token: setupToken }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.syncAccounts }),
+  })
+}
+
+export function useLinkSyncAccount() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: {
+      external_id: string
+      account_id?: number
+      create_as?: { name: string; kind: string }
+    }) => api.post<SyncAccountStatus[]>('/sync/link', body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.syncAccounts })
+      qc.invalidateQueries({ queryKey: ['accounts'] })
+    },
+  })
+}
+
+export function useRunSync() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (days: number = 30) =>
+      api.post<SyncRunRead>('/sync/run', { days }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.syncAccounts })
+      qc.invalidateQueries({ queryKey: queryKeys.syncRuns })
       qc.invalidateQueries({ queryKey: ['transactions'] })
       qc.invalidateQueries({ queryKey: ['budget'] })
     },

@@ -339,3 +339,50 @@ class RuleReorderRequest(BaseModel):
 
 class RuleApplyResponse(BaseModel):
     changed: int
+
+
+# --- Bank sync -------------------------------------------------------------
+
+
+class SyncClaimRequest(BaseModel):
+    setup_token: str
+
+
+class SyncAccountStatus(BaseModel):
+    external_id: str
+    name: str
+    org_name: str
+    currency: str
+    reported_balance_cents: int | None = None
+    balance_date: str | None = None
+    linked_account_id: int | None = None
+    local_account_name: str | None = None
+    computed_balance_cents: int | None = None
+    last_synced_at: dt.datetime | None = None
+    mismatch: bool = False
+
+
+class SyncCreateAccount(BaseModel):
+    name: str
+    kind: AccountKind
+
+
+class SyncLinkRequest(BaseModel):
+    external_id: str
+    account_id: int | None = None
+    create_as: SyncCreateAccount | None = None
+
+
+class SyncRunRequest(BaseModel):
+    days: int = 30
+
+
+class SyncRunRead(ORMModel):
+    id: int
+    started_at: dt.datetime
+    finished_at: dt.datetime | None = None
+    status: Literal["ok", "partial", "failed"]
+    accounts_synced: int
+    added: int
+    updated: int
+    errors: list = []

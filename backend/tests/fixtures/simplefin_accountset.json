@@ -1,0 +1,32 @@
+{
+  "errlist": [],
+  "accounts": [
+    {
+      "id": "ACT-1",
+      "name": "Everyday Checking",
+      "currency": "USD",
+      "balance": "1234.5",
+      "available-balance": "1200.00",
+      "balance-date": 1767225600,
+      "org": {
+        "name": "Test Bank",
+        "domain": "testbank.com",
+        "sfin-url": "https://bridge.simplefin.org/simplefin"
+      },
+      "transactions": [
+        {
+          "id": "T1",
+          "posted": 1767225600,
+          "amount": "-52.30",
+          "description": "PUBLIX #1234"
+        },
+        {
+          "id": "T2",
+          "posted": 1767225600,
+          "amount": "2465.00",
+          "description": "ACME, INC PAYROLL"
+        }
+      ]
+    }
+  ]
+}

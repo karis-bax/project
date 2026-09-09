@@ -13,6 +13,7 @@ from .routers import (
     health,
     imports,
     rules,
+    sync,
     transactions,
 )
 
@@ -34,3 +35,4 @@ app.include_router(budget.router)
 app.include_router(goals.router)
 app.include_router(rules.router)
 app.include_router(imports.router)
+app.include_router(sync.router)

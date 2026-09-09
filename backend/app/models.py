@@ -13,6 +13,7 @@ import enum
 from datetime import date, datetime
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Date,
     DateTime,
@@ -46,6 +47,18 @@ class GoalKind(enum.Enum):
     spending_cap = "spending_cap"
 
 
+class TxnSource(enum.Enum):
+    manual = "manual"
+    csv = "csv"
+    sync = "sync"
+
+
+class SyncStatus(enum.Enum):
+    ok = "ok"
+    partial = "partial"
+    failed = "failed"
+
+
 class TimestampMixin:
     """Adds ``created_at`` / ``updated_at`` columns to a model."""
 
@@ -62,6 +75,11 @@ class TimestampMixin:
 
 class Account(TimestampMixin, Base):
     __tablename__ = "accounts"
+    __table_args__ = (
+        UniqueConstraint(
+            "sync_source", "external_id", name="uq_account_sync_external"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
@@ -73,6 +91,13 @@ class Account(TimestampMixin, Base):
     )
     archived: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
+    )
+
+    # Bank-sync linkage (null for manual accounts).
+    external_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    sync_source: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
     )
 
     transactions: Mapped[list[Transaction]] = relationship(
@@ -117,6 +142,10 @@ class Transaction(TimestampMixin, Base):
         Index("ix_transactions_date", "date"),
         Index("ix_transactions_account_id_date", "account_id", "date"),
         Index("ix_transactions_category_id", "category_id"),
+        # SimpleFIN ids are unique only within an account, not globally.
+        UniqueConstraint(
+            "account_id", "external_id", name="uq_txn_account_external"
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -138,6 +167,18 @@ class Transaction(TimestampMixin, Base):
     )
     import_hash: Mapped[str | None] = mapped_column(
         String, nullable=True, unique=True
+    )
+
+    # Provenance and bank-sync fields.
+    external_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    source: Mapped[TxnSource] = mapped_column(
+        SAEnum(TxnSource, name="txn_source"),
+        nullable=False,
+        default=TxnSource.manual,
+        server_default="manual",
+    )
+    pending: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
     )
 
     account: Mapped[Account] = relationship(back_populates="transactions")
@@ -197,3 +238,23 @@ class Goal(TimestampMixin, Base):
     target_month: Mapped[str | None] = mapped_column(String, nullable=True)
 
     category: Mapped[Category] = relationship()
+
+
+class SyncRun(TimestampMixin, Base):
+    __tablename__ = "sync_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    status: Mapped[SyncStatus] = mapped_column(
+        SAEnum(SyncStatus, name="sync_status"), nullable=False
+    )
+    accounts_synced: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    added: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # errlist entries surfaced from the provider (list of {message, ...}).
+    errors: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
