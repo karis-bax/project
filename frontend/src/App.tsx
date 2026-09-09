@@ -1,11 +1,13 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 
+import { RequireAuth } from './components/RequireAuth'
 import { Shell } from './components/Shell'
 import { EmptyState } from './components/ui'
 import { currentMonth } from './lib/month'
 import { BudgetPage } from './routes/BudgetPage'
 import { ImportPage } from './routes/ImportPage'
 import { InsightsPage } from './routes/InsightsPage'
+import { LoginPage } from './routes/LoginPage'
 import { RulesPage } from './routes/RulesPage'
 import { SettingsPage } from './routes/SettingsPage'
 import { SyncPage } from './routes/SyncPage'
@@ -15,6 +17,9 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="login" element={<LoginPage />} />
+        {/* Everything below requires a session. */}
+        <Route element={<RequireAuth />}>
         <Route element={<Shell />}>
           <Route
             index
@@ -36,6 +41,7 @@ export default function App() {
               />
             }
           />
+        </Route>
         </Route>
       </Routes>
     </BrowserRouter>

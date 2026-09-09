@@ -4,6 +4,7 @@ import { currentMonth, formatMonthLabel } from '../lib/month'
 import { useAccounts } from '../lib/queries'
 import type { AccountKind, AccountRead } from '../lib/types'
 import { EmptyState, Money, SkeletonRows } from './ui'
+import { useAuth } from '../lib/authContextValue'
 
 const KIND_LABEL: Record<AccountKind, string> = {
   checking: 'Checking',
@@ -71,6 +72,7 @@ function AccountBalances() {
 }
 
 export function Shell() {
+  const { user, signOut } = useAuth()
   const location = useLocation()
   const budgetMatch = useMatch('/budget/:month')
   const month = budgetMatch?.params.month
@@ -112,7 +114,21 @@ export function Shell() {
           <AccountBalances />
         </div>
 
-        <div className="mt-auto px-4 py-3 text-[11px] text-[var(--fg-subtle)] border-t border-[var(--border)]">
+        <div className="mt-auto border-t border-[var(--border)] px-4 py-3 text-[11px] text-[var(--fg-subtle)]">
+          {user !== null && (
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="truncate" title={user.email}>
+                {user.email}
+              </span>
+              <button
+                type="button"
+                onClick={() => void signOut()}
+                className="shrink-0 underline underline-offset-2 hover:text-[var(--fg)]"
+              >
+                Sign out
+              </button>
+            </div>
+          )}
           Zero-based budgeting
         </div>
       </aside>

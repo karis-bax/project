@@ -485,3 +485,84 @@ def test_unknown_fields_are_rejected(client: TestClient) -> None:
         },
     )
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# dual transport: cookie for web, body for native
+# ---------------------------------------------------------------------------
+
+
+def test_web_client_receives_an_httponly_refresh_cookie(
+    anonymous_client: TestClient, default_user
+) -> None:
+    resp = anonymous_client.post(
+        "/api/auth/login",
+        json={"email": default_user.email, "password": DEFAULT_PASSWORD},
+    )
+    assert resp.status_code == 200
+    cookie = resp.headers.get("set-cookie", "")
+    assert "envelope_refresh=" in cookie
+    assert "HttpOnly" in cookie, "script must not be able to read the refresh token"
+    assert "Secure" in cookie, "must not travel over plain http in production"
+    assert "samesite=lax" in cookie.lower()
+
+
+def test_native_client_gets_no_cookie(
+    anonymous_client: TestClient, default_user
+) -> None:
+    """Expo has no cookie jar; it keeps the token in expo-secure-store."""
+
+    resp = anonymous_client.post(
+        "/api/auth/login",
+        json={"email": default_user.email, "password": DEFAULT_PASSWORD},
+        headers={"X-Envelope-Client": "native"},
+    )
+    assert resp.status_code == 200
+    assert "envelope_refresh=" not in resp.headers.get("set-cookie", "")
+    assert resp.json()["refresh_token"].startswith("env_rt_")
+
+
+def test_refresh_accepts_the_cookie_with_no_body(
+    anonymous_client: TestClient, default_user
+) -> None:
+    # TestClient speaks http, and a Secure cookie is not returned over http —
+    # the same reason local development needs COOKIE_SECURE=false.
+    def _dev_cookies() -> Settings:
+        return Settings(cookie_secure=False)
+
+    with override_dependencies({get_settings: _dev_cookies}):
+        _refresh_round_trip(anonymous_client, default_user)
+
+
+def _refresh_round_trip(anonymous_client: TestClient, default_user) -> None:
+    anonymous_client.post(
+        "/api/auth/login",
+        json={"email": default_user.email, "password": DEFAULT_PASSWORD},
+    )
+    # The TestClient keeps the cookie jar, so this is what the web app sends.
+    rotated = anonymous_client.post("/api/auth/refresh", json={})
+    assert rotated.status_code == 200, rotated.text
+    assert rotated.json()["access_token"].startswith("env_at_")
+
+
+def test_refresh_with_neither_body_nor_cookie_is_401(
+    anonymous_client: TestClient,
+) -> None:
+    resp = anonymous_client.post("/api/auth/refresh", json={})
+    assert resp.status_code == 401
+
+
+def test_logout_clears_the_cookie(anonymous_client: TestClient, default_user) -> None:
+    login = anonymous_client.post(
+        "/api/auth/login",
+        json={"email": default_user.email, "password": DEFAULT_PASSWORD},
+    ).json()
+    out = anonymous_client.post(
+        "/api/auth/logout",
+        headers={"Authorization": f"Bearer {login['access_token']}"},
+        json={},
+    )
+    assert out.status_code == 200
+    assert 'envelope_refresh=""' in out.headers.get(
+        "set-cookie", ""
+    ) or "envelope_refresh=;" in out.headers.get("set-cookie", "")

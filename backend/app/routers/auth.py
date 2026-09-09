@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
@@ -36,6 +36,35 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 # from "wrong password" — either would be an account-existence oracle.
 _INVALID_CREDENTIALS = "Invalid email or password."
 _INVALID_REFRESH = "Invalid or expired refresh token."
+
+# Web clients receive the refresh token as an httpOnly cookie instead of
+# reading it from the response body. Native clients (Expo) cannot use cookie
+# semantics and keep using the body, holding the token in expo-secure-store.
+# One endpoint, two transports, one security model.
+#
+# The difference that matters: a refresh token in JavaScript-reachable storage
+# is a long-lived credential an XSS can exfiltrate and replay later from
+# anywhere. In an httpOnly cookie, script cannot read it at all.
+REFRESH_COOKIE = "envelope_refresh"
+_WEB_CLIENT_HEADER = "x-envelope-client"
+
+
+def _is_web_client(request: Request) -> bool:
+    return request.headers.get(_WEB_CLIENT_HEADER, "").lower() != "native"
+
+
+def _set_refresh_cookie(
+    response: Response, token: str, max_age_days: int, *, secure: bool
+) -> None:
+    response.set_cookie(
+        REFRESH_COOKIE,
+        token,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        max_age=max_age_days * 24 * 60 * 60,
+        path="/api/auth",
+    )
 
 
 def _recent_failures(db: Session, email: str, window_minutes: int) -> int:
@@ -111,6 +140,7 @@ def register(
 @router.post("/login", response_model=schemas.TokenPairResponse)
 def login(
     payload: schemas.LoginRequest,
+    request: Request,
     response: Response,
     db: Session = Depends(get_auth_db),
     settings: Settings = Depends(get_settings),
@@ -153,6 +183,13 @@ def login(
 
     pair = token_service.issue_pair(db, user)
     db.commit()
+    if _is_web_client(request):
+        _set_refresh_cookie(
+            response,
+            pair.refresh_token,
+            settings.refresh_token_ttl_days,
+            secure=settings.cookie_secure,
+        )
     return schemas.TokenPairResponse(
         access_token=pair.access_token,
         refresh_token=pair.refresh_token,
@@ -162,10 +199,21 @@ def login(
 
 @router.post("/refresh", response_model=schemas.TokenPairResponse)
 def refresh(
-    payload: schemas.RefreshRequest, db: Session = Depends(get_auth_db)
+    request: Request,
+    response: Response,
+    payload: schemas.RefreshRequest | None = None,
+    envelope_refresh: str | None = Cookie(default=None, alias=REFRESH_COOKIE),
+    db: Session = Depends(get_auth_db),
+    settings: Settings = Depends(get_settings),
 ) -> schemas.TokenPairResponse:
+    # Body first (native), then cookie (web).
+    presented = (payload.refresh_token if payload and payload.refresh_token else None) or envelope_refresh
+    if not presented:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=_INVALID_REFRESH
+        )
     try:
-        pair = token_service.rotate(db, payload.refresh_token)
+        pair = token_service.rotate(db, presented)
     except token_service.TokenError:
         # Identical response whether the token was unknown, expired, revoked,
         # or just triggered a family revocation for reuse. Telling the caller
@@ -173,6 +221,13 @@ def refresh(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=_INVALID_REFRESH
         ) from None
+    if _is_web_client(request):
+        _set_refresh_cookie(
+            response,
+            pair.refresh_token,
+            settings.refresh_token_ttl_days,
+            secure=settings.cookie_secure,
+        )
     return schemas.TokenPairResponse(
         access_token=pair.access_token,
         refresh_token=pair.refresh_token,
@@ -183,7 +238,9 @@ def refresh(
 @router.post("/logout", response_model=schemas.LogoutResponse)
 def logout(
     request: Request,
+    response: Response,
     payload: schemas.LogoutRequest | None = None,
+    envelope_refresh: str | None = Cookie(default=None, alias=REFRESH_COOKIE),
     db: Session = Depends(get_auth_db),
     user: User = Depends(get_current_user),
     credentials=Depends(bearer_scheme),  # noqa: B008
@@ -196,11 +253,14 @@ def logout(
 
     # Both lookups are scoped to the authenticated user: a refresh token
     # belonging to somebody else must not be revocable here.
+    response.delete_cookie(REFRESH_COOKIE, path="/api/auth")
+
     family_id: int | None = None
-    if payload is not None and payload.refresh_token:
-        family_id = token_service.family_of_refresh_token(
-            db, payload.refresh_token, user.id
-        )
+    presented = (
+        payload.refresh_token if payload and payload.refresh_token else None
+    ) or envelope_refresh
+    if presented:
+        family_id = token_service.family_of_refresh_token(db, presented, user.id)
     if family_id is None and credentials is not None:
         family_id = token_service.family_of_access_token(
             db, credentials.credentials, user.id

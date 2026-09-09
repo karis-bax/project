@@ -405,3 +405,20 @@ export interface RecurringResponse {
   items: RecurringItem[]
   total_committed_monthly_cents: number
 }
+
+
+// --- Auth --------------------------------------------------------------------
+
+export interface UserRead {
+  id: number
+  email: string
+  is_active: boolean
+  created_at: string
+}
+
+export interface TokenPairResponse {
+  access_token: string
+  refresh_token: string
+  token_type: 'bearer'
+  expires_in: number
+}

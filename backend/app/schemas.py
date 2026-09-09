@@ -56,7 +56,9 @@ class LoginRequest(RequestModel):
 
 
 class RefreshRequest(RequestModel):
-    refresh_token: str = Field(min_length=1, max_length=512)
+    # Optional: web clients present the token in an httpOnly cookie instead, so
+    # an empty body is legitimate and must reach the handler rather than 422.
+    refresh_token: str | None = Field(default=None, max_length=512)
 
 
 class LogoutRequest(RequestModel):

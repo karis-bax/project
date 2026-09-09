@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     login_max_attempts: int = 5
     login_window_minutes: int = 15
 
+    # Secure cookies are not sent over plain http, so local development on
+    # http://localhost needs this off. It must be ON anywhere reachable off the
+    # machine — which is the whole point of the deployment this change is for.
+    cookie_secure: bool = True
+
     # --- exposure ---------------------------------------------------------
     # /openapi.json lists every route; close it in production rather than
     # relying on status-code cleverness to hide endpoints.

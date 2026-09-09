@@ -61,6 +61,25 @@ boundary.
 - Sync owns amount, date, description and pending status. The user owns
   category and memo. Resync never overwrites a category.
 
+## Auth and tenancy
+- Every route is closed by default: auth is a global app dependency with a
+  pinned exemption set in `app/auth/dependencies.py`. A new route is protected
+  without anyone remembering to protect it.
+- Rows are scoped at session level in `app/db.py`, the same way soft-delete is.
+  Never hand-write `.where(user_id == ...)` — and never `db.get()` a
+  tenant-owned model (it returns identity-map hits without emitting SQL, so no
+  filter applies). Use `deps.get_live_or_404`.
+- There is NO per-statement opt-out from tenant scoping. The only way out is
+  `unscoped_session(reason=...)`, whose call sites are enumerated by a test.
+- `user_id` comes from the authenticated session on every write, never from a
+  request body; a body containing one is rejected, not ignored.
+- Another user's row is a 404, never a 403 — and the response must be
+  indistinguishable from one for an id that does not exist.
+- Refresh tokens rotate and are single-use. **Any client must serialise refresh
+  behind a single-flight mutex**: concurrent refreshes present an
+  already-rotated token, which reuse detection treats as theft and answers by
+  revoking the session.
+
 ## Soft-delete
 - Transactions soft-delete via `deleted_at`. Filtering is enforced at session
   level with `with_loader_criteria` — never add `.where(deleted_at.is_(None))`

@@ -7,7 +7,14 @@
  *   (which the Vite dev server proxies to the backend).
  */
 
+import { getAccessToken } from './authStorage'
+
 const BASE_URL = import.meta.env.VITE_API_URL ?? '/api'
+
+// Routes that must never trigger a refresh-and-retry: /auth/refresh would
+// recurse into itself, and a 401 from login is a wrong password, not an
+// expired session.
+const AUTH_FREE_PATHS = ['/auth/login', '/auth/refresh', '/auth/register']
 
 export class ApiError extends Error {
   readonly status: number
@@ -31,17 +38,35 @@ function extractDetail(body: unknown, fallback: string): string {
   return fallback
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, retried = false): Promise<T> {
   // FormData bodies must not carry an explicit JSON content-type; the browser
   // sets the multipart boundary itself.
   const isFormData = init?.body instanceof FormData
+  const token = getAccessToken()
   const response = await fetch(`${BASE_URL}${path}`, {
     ...init,
+    // Sends the httpOnly refresh cookie. The access token still travels in the
+    // Authorization header, so the native client uses the identical API.
+    credentials: 'include',
     headers: {
       ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers ?? {}),
     },
   })
+
+  if (
+    response.status === 401 &&
+    !retried &&
+    !AUTH_FREE_PATHS.some((p) => path.startsWith(p))
+  ) {
+    // Lazily imported to keep the module graph acyclic: authClient imports api.
+    const { refreshAccessToken } = await import('./authClient')
+    const fresh = await refreshAccessToken()
+    // `retried` guarantees exactly one extra attempt, so a token the server
+    // rejects twice cannot loop.
+    if (fresh !== null) return request<T>(path, init, true)
+  }
 
   if (!response.ok) {
     let detail = response.statusText

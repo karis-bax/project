@@ -40,3 +40,6 @@ pnpm-debug.log*
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# --- Frontend build info ---
+*.tsbuildinfo
