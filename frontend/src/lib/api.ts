@@ -32,10 +32,13 @@ function extractDetail(body: unknown, fallback: string): string {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // FormData bodies must not carry an explicit JSON content-type; the browser
+  // sets the multipart boundary itself.
+  const isFormData = init?.body instanceof FormData
   const response = await fetch(`${BASE_URL}${path}`, {
     ...init,
     headers: {
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...(init?.headers ?? {}),
     },
   })
@@ -74,4 +77,6 @@ export const api = {
       body: body === undefined ? undefined : JSON.stringify(body),
     }),
   del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  postForm: <T>(path: string, form: FormData) =>
+    request<T>(path, { method: 'POST', body: form }),
 }

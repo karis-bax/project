@@ -311,6 +311,142 @@ def test_transactions_payees_suggestion(
     assert payees[0]["count"] == 4
 
 
+# --- rules -----------------------------------------------------------------
+
+
+def test_rules_crud_and_apply(client: TestClient, session: Session) -> None:
+    account, _group, category = seed_basics(session)
+    session.add(
+        Transaction(
+            account_id=account.id,
+            category_id=None,
+            date=date(2026, 1, 3),
+            payee="PUBLIX #1234",
+            amount_cents=-5000,
+        )
+    )
+    session.commit()
+
+    created = client.post(
+        "/api/rules",
+        json={
+            "match_field": "payee",
+            "pattern": "publix",
+            "category_id": category.id,
+            "priority": 10,
+        },
+    )
+    assert created.status_code == 201
+
+    assert len(client.get("/api/rules").json()) == 1
+
+    # Apply to existing uncategorized transactions.
+    applied = client.post("/api/rules/apply")
+    assert applied.status_code == 200
+    assert applied.json() == {"changed": 1}
+    # Re-applying changes nothing (already categorized).
+    assert client.post("/api/rules/apply").json() == {"changed": 0}
+
+
+def test_create_rule_bad_category_is_404(client: TestClient) -> None:
+    resp = client.post(
+        "/api/rules",
+        json={"match_field": "payee", "pattern": "x", "category_id": 9999},
+    )
+    assert resp.status_code == 404
+
+
+# --- CSV import ------------------------------------------------------------
+
+_SIMPLE_CSV = (
+    "Date,Description,Amount\n"
+    "01/15/2026,PUBLIX #1234,-52.30\n"
+    "2026-01-16,\"ACME, INC PAYROLL\",2465.00\n"
+    "\n"
+    "Total,,-999.99\n"
+)
+
+
+def test_import_preview_and_commit(client: TestClient, session: Session) -> None:
+    account, _group, _category = seed_basics(session)
+
+    preview = client.post(
+        "/api/import/preview",
+        data={"account_id": str(account.id)},
+        files={"file": ("bank.csv", _SIMPLE_CSV, "text/csv")},
+    )
+    assert preview.status_code == 200
+    body = preview.json()
+    token = body["token"]
+    assert body["mapping"]["amount_shape"] == "signed"
+    assert body["mapping"]["date_col"] == 0
+
+    importable = [r for r in body["rows"] if r["importable"]]
+    assert len(importable) == 2  # PUBLIX + ACME; the "Total" line is not importable
+    assert any(not r["importable"] for r in body["rows"])  # summary line flagged
+
+    commit = client.post(
+        "/api/import/commit",
+        json={
+            "token": token,
+            "rows": [
+                {
+                    "date": r["date"],
+                    "payee": r["payee"],
+                    "amount_cents": r["amount_cents"],
+                    "memo": r["memo"],
+                    "category_id": r["proposed_category_id"],
+                    "is_duplicate": r["is_duplicate"],
+                }
+                for r in importable
+            ],
+            "skip_duplicates": True,
+        },
+    )
+    assert commit.status_code == 200
+    assert commit.json() == {"imported": 2, "skipped_duplicate": 0, "failed": 0}
+
+    # A second preview now flags both rows as duplicates (hashes exist).
+    preview2 = client.post(
+        "/api/import/preview",
+        data={"account_id": str(account.id)},
+        files={"file": ("bank.csv", _SIMPLE_CSV, "text/csv")},
+    )
+    dup_rows = [r for r in preview2.json()["rows"] if r["importable"]]
+    assert all(r["is_duplicate"] for r in dup_rows)
+
+    # Committing again with skip_duplicates is idempotent: nothing new imported.
+    commit2 = client.post(
+        "/api/import/commit",
+        json={
+            "token": preview2.json()["token"],
+            "rows": [
+                {
+                    "date": r["date"],
+                    "payee": r["payee"],
+                    "amount_cents": r["amount_cents"],
+                    "memo": r["memo"],
+                    "category_id": r["proposed_category_id"],
+                    "is_duplicate": r["is_duplicate"],
+                }
+                for r in dup_rows
+            ],
+            "skip_duplicates": True,
+        },
+    )
+    assert commit2.json()["imported"] == 0
+    assert commit2.json()["skipped_duplicate"] == 2
+
+
+def test_import_preview_bad_account_is_404(client: TestClient) -> None:
+    resp = client.post(
+        "/api/import/preview",
+        data={"account_id": "9999"},
+        files={"file": ("bank.csv", _SIMPLE_CSV, "text/csv")},
+    )
+    assert resp.status_code == 404
+
+
 def test_bulk_categorize_bad_category_is_404(
     client: TestClient, session: Session
 ) -> None:

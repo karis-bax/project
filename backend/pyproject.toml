@@ -9,6 +9,7 @@ dependencies = [
     "sqlalchemy>=2.0",
     "pydantic>=2.7",
     "alembic>=1.13",
+    "python-multipart>=0.0.9",
 ]
 
 [dependency-groups]

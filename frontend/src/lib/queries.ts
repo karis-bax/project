@@ -29,13 +29,20 @@ import type {
   CategoryGroupRead,
   CategoryGroupWithCategories,
   CategoryRead,
+  CategoryRuleCreate,
+  CategoryRuleRead,
   CopyFromPreviousResponse,
   CountResponse,
   DeletedResponse,
   GoalRead,
   HealthResponse,
+  ImportCommitResponse,
+  ImportCommitRow,
+  ImportMapping,
+  ImportPreviewResponse,
   MonthBudget,
   PayeeSuggestion,
+  RuleApplyResponse,
   TransactionCreate,
   TransactionListResponse,
   TransactionRead,
@@ -64,6 +71,7 @@ export const queryKeys = {
   payees: ['payees'] as const,
   budget: (month: string) => ['budget', month] as const,
   goals: ['goals'] as const,
+  rules: ['rules'] as const,
 }
 
 function buildQuery(params: Record<string, string | number | boolean | undefined>): string {
@@ -322,5 +330,99 @@ export function useCopyFromPrevious() {
       api.post<CopyFromPreviousResponse>(`/budget/${month}/copy-from-previous`),
     onSuccess: (_data, month) =>
       qc.invalidateQueries({ queryKey: queryKeys.budget(month) }),
+  })
+}
+
+// --- CSV import ------------------------------------------------------------
+
+export function useImportPreview() {
+  return useMutation({
+    mutationFn: ({ file, accountId }: { file: File; accountId: number }) => {
+      const form = new FormData()
+      form.append('account_id', String(accountId))
+      form.append('file', file)
+      return api.postForm<ImportPreviewResponse>('/import/preview', form)
+    },
+  })
+}
+
+export function useImportRemap() {
+  return useMutation({
+    mutationFn: ({ token, mapping }: { token: string; mapping: ImportMapping }) =>
+      api.post<ImportPreviewResponse>('/import/remap', { token, mapping }),
+  })
+}
+
+export function useImportCommit() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      token,
+      rows,
+      skipDuplicates,
+    }: {
+      token: string
+      rows: ImportCommitRow[]
+      skipDuplicates: boolean
+    }) =>
+      api.post<ImportCommitResponse>('/import/commit', {
+        token,
+        rows,
+        skip_duplicates: skipDuplicates,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['transactions'] })
+      qc.invalidateQueries({ queryKey: ['budget'] })
+      qc.invalidateQueries({ queryKey: queryKeys.payees })
+    },
+  })
+}
+
+// --- Rules -----------------------------------------------------------------
+
+export function useRules() {
+  return useQuery({
+    queryKey: queryKeys.rules,
+    queryFn: () => api.get<CategoryRuleRead[]>('/rules'),
+  })
+}
+
+export function useCreateRule() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CategoryRuleCreate) =>
+      api.post<CategoryRuleRead>('/rules', body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.rules }),
+  })
+}
+
+export function useDeleteRule() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api.del<DeletedResponse>(`/rules/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.rules }),
+  })
+}
+
+export function useReorderRules() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (ruleIds: number[]) =>
+      api.patch<CategoryRuleRead[]>('/rules/reorder', { rule_ids: ruleIds }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.rules }),
+  })
+}
+
+export function useApplyRules() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (month?: string) =>
+      api.post<RuleApplyResponse>(
+        `/rules/apply${month ? `?month=${month}` : ''}`,
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['transactions'] })
+      qc.invalidateQueries({ queryKey: ['budget'] })
+    },
   })
 }

@@ -1,6 +1,8 @@
+import { Link } from 'react-router-dom'
+
 import { useAccounts, useCategories } from '../lib/queries'
 import { ApiError } from '../lib/api'
-import { EmptyState, ErrorState, Placeholder, SkeletonRows } from '../components/ui'
+import { ErrorState, SkeletonRows } from '../components/ui'
 
 export function SettingsPage() {
   const accounts = useAccounts(true)
@@ -21,21 +23,30 @@ export function SettingsPage() {
 
   const accountCount = accounts.data?.length ?? 0
   const groupCount = categories.data?.length ?? 0
-  if (accountCount === 0 && groupCount === 0) {
-    return (
-      <EmptyState
-        title="Nothing to configure yet"
-        hint="Add accounts and category groups to begin."
-      />
-    )
-  }
+
+  const card =
+    'block rounded-md border border-[var(--border)] px-4 py-3 hover:bg-[var(--row-hover)]'
 
   return (
-    <div className="max-w-3xl">
-      <Placeholder
-        title="Settings editors arrive in a later phase"
-        hint={`${accountCount} account(s) and ${groupCount} category group(s) connected from the live API.`}
-      />
+    <div className="mx-auto flex max-w-3xl flex-col gap-3">
+      <h1 className="text-lg font-semibold text-[var(--fg)]">Settings</h1>
+      <p className="text-[var(--fg-muted)]">
+        {accountCount} account(s) · {groupCount} category group(s).
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Link to="/settings/import" className={card}>
+          <p className="font-medium text-[var(--fg)]">Import CSV</p>
+          <p className="text-[var(--fg-muted)]">
+            Bring in bank exports with a preview-then-commit flow.
+          </p>
+        </Link>
+        <Link to="/settings/rules" className={card}>
+          <p className="font-medium text-[var(--fg)]">Rules</p>
+          <p className="text-[var(--fg-muted)]">
+            Auto-categorize transactions by payee or memo.
+          </p>
+        </Link>
+      </div>
     </div>
   )
 }

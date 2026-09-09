@@ -4,7 +4,9 @@ import { Shell } from './components/Shell'
 import { EmptyState } from './components/ui'
 import { currentMonth } from './lib/month'
 import { BudgetPage } from './routes/BudgetPage'
+import { ImportPage } from './routes/ImportPage'
 import { InsightsPage } from './routes/InsightsPage'
+import { RulesPage } from './routes/RulesPage'
 import { SettingsPage } from './routes/SettingsPage'
 import { TransactionsPage } from './routes/TransactionsPage'
 
@@ -21,6 +23,8 @@ export default function App() {
           <Route path="transactions" element={<TransactionsPage />} />
           <Route path="insights" element={<InsightsPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="settings/import" element={<ImportPage />} />
+          <Route path="settings/rules" element={<RulesPage />} />
           <Route
             path="*"
             element={

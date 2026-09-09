@@ -5,7 +5,16 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import accounts, budget, categories, goals, health, transactions
+from .routers import (
+    accounts,
+    budget,
+    categories,
+    goals,
+    health,
+    imports,
+    rules,
+    transactions,
+)
 
 app = FastAPI(title="Envelope API", version="0.1.0")
 
@@ -23,3 +32,5 @@ app.include_router(categories.router)
 app.include_router(transactions.router)
 app.include_router(budget.router)
 app.include_router(goals.router)
+app.include_router(rules.router)
+app.include_router(imports.router)
