@@ -359,6 +359,7 @@ class SyncAccountStatus(BaseModel):
     local_account_name: str | None = None
     computed_balance_cents: int | None = None
     last_synced_at: dt.datetime | None = None
+    opening_balance_source: str | None = None
     mismatch: bool = False
 
 
