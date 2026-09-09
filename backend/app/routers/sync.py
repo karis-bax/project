@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from .. import schemas
 from ..deps import get_db
-from ..models import Account, SyncRun, Transaction
+from ..models import Account, OpeningBalanceSource, SyncRun, Transaction
 from ..sync import credentials, service
 from ..sync.base import SyncError
 from ..sync.simplefin import SetupTokenError, claim_setup_token
@@ -18,16 +18,20 @@ from ..sync.simplefin import SetupTokenError, claim_setup_token
 router = APIRouter(prefix="/api/sync", tags=["sync"])
 
 
-def _computed_balance(db: Session, account_id: int) -> int:
-    opening = db.scalar(
-        select(Account.opening_balance_cents).where(Account.id == account_id)
-    )
-    total = db.scalar(
-        select(func.coalesce(func.sum(Transaction.amount_cents), 0)).where(
-            Transaction.account_id == account_id
+def _transaction_sums(db: Session, account_ids: list[int]) -> dict[int, int]:
+    """One grouped aggregate of transaction totals for the given accounts."""
+
+    if not account_ids:
+        return {}
+    rows = db.execute(
+        select(
+            Transaction.account_id,
+            func.coalesce(func.sum(Transaction.amount_cents), 0),
         )
-    )
-    return int(opening or 0) + int(total or 0)
+        .where(Transaction.account_id.in_(account_ids))
+        .group_by(Transaction.account_id)
+    ).all()
+    return {account_id: int(total) for account_id, total in rows}
 
 
 def _statuses(db: Session) -> list[schemas.SyncAccountStatus]:
@@ -40,13 +44,20 @@ def _statuses(db: Session) -> list[schemas.SyncAccountStatus]:
     }
     discovered = service.discovered()
 
+    # Single grouped query for all linked accounts' ledger sums (no N+1).
+    sums = _transaction_sums(db, [a.id for a in linked.values()])
+
     external_ids = set(discovered) | set(linked)
     rows: list[schemas.SyncAccountStatus] = []
     for external_id in sorted(external_ids):
         disc = discovered.get(external_id)
         local = linked.get(external_id)
         reported = disc.balance_cents if disc else None
-        computed = _computed_balance(db, local.id) if local else None
+        computed = (
+            local.opening_balance_cents + sums.get(local.id, 0)
+            if local
+            else None
+        )
         mismatch = (
             reported is not None and computed is not None and reported != computed
         )
@@ -64,6 +75,9 @@ def _statuses(db: Session) -> list[schemas.SyncAccountStatus]:
                 local_account_name=local.name if local else None,
                 computed_balance_cents=computed,
                 last_synced_at=local.last_synced_at if local else None,
+                opening_balance_source=local.opening_balance_source.value
+                if local
+                else None,
                 mismatch=mismatch,
             )
         )
@@ -149,6 +163,7 @@ def link_account(
             external_id=payload.external_id,
         )
         db.add(account)
+        db.flush()
     else:
         account = db.get(Account, payload.account_id)
         if account is None:
@@ -158,6 +173,16 @@ def link_account(
             )
         account.sync_source = "simplefin"
         account.external_id = payload.external_id
+
+    # Anchor the opening balance to the bank's reported balance at link time, so
+    # the ledger reconciles now and any later divergence is real signal (F8).
+    # This is an anchor, not a verified full-history figure.
+    disc = service.discovered().get(payload.external_id)
+    if disc is not None:
+        window_sum = _transaction_sums(db, [account.id]).get(account.id, 0)
+        account.opening_balance_cents = disc.balance_cents - window_sum
+        account.opening_balance_source = OpeningBalanceSource.derived_at_link
+        account.opening_balance_derived_at = datetime.now()
 
     db.commit()
     return _statuses(db)
@@ -173,7 +198,12 @@ def run(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Not connected to a bank. Claim a setup token first.",
         )
-    run_row = service.run_sync(db, provider, days=payload.days)
+    try:
+        run_row = service.run_sync(db, provider, days=payload.days)
+    except service.SyncInProgress as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from None
     return _run_to_schema(run_row)
 
 

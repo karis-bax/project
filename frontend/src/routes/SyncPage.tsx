@@ -155,7 +155,7 @@ function AccountRow({ row }: { row: SyncAccountStatus }) {
           <Money cents={row.computed_balance_cents} />
         )}
       </span>
-      <span className="text-right text-[12px]">
+      <span className="flex flex-col items-end text-[12px]">
         {row.mismatch ? (
           <span className="rounded bg-[var(--warn-weak)] px-1.5 py-0.5 text-[var(--warn)]">
             mismatch
@@ -166,6 +166,9 @@ function AccountRow({ row }: { row: SyncAccountStatus }) {
           <span className="text-[var(--fg-subtle)]">
             {row.last_synced_at ? '' : 'never synced'}
           </span>
+        )}
+        {row.opening_balance_source === 'derived_at_link' && (
+          <span className="text-[var(--fg-subtle)]">anchored at link</span>
         )}
       </span>
     </div>
@@ -250,6 +253,14 @@ export function SyncPage() {
             <AccountRow key={row.external_id} row={row} />
           ))}
         </div>
+      )}
+
+      {connected && (
+        <p className="text-[12px] text-[var(--fg-subtle)]">
+          Ledger balances are anchored to the bank's reported balance at link
+          time — not a verified check of full history. After the anchor, any
+          divergence between the two columns is real signal.
+        </p>
       )}
     </div>
   )

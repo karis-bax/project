@@ -15,7 +15,14 @@ from sqlalchemy.pool import StaticPool
 
 from app import importer  # noqa: F401 - ensures models import path is warm
 from app.db import Base
-from app.models import Account, AccountKind, Transaction, TxnSource
+from app.models import (
+    Account,
+    AccountKind,
+    SyncRun,
+    SyncStatus,
+    Transaction,
+    TxnSource,
+)
 from app.sync import credentials, engine, service, simplefin
 from app.sync.base import NormalizedAccount, NormalizedTxn, SyncError
 
@@ -314,6 +321,178 @@ def test_redact_scrubs_access_url(monkeypatch: pytest.MonkeyPatch) -> None:
     redacted = credentials.redact(text)
     assert _SECRET_URL not in redacted
     assert "secretpass" not in redacted
+
+
+def _txn_count(db: Session) -> int:
+    from sqlalchemy import func, select
+
+    return db.scalar(select(func.count()).select_from(Transaction))
+
+
+def _posted(external_id: str, when: date, cents: int, desc: str) -> NormalizedTxn:
+    return NormalizedTxn(
+        external_id=external_id,
+        posted_date=when,
+        amount_cents=cents,
+        description=desc,
+        pending=False,
+    )
+
+
+def _one_account(txns: list[NormalizedTxn]) -> list[NormalizedAccount]:
+    return [
+        NormalizedAccount(
+            external_id="ACT-1",
+            name="Checking",
+            org_name="Test Bank",
+            currency="USD",
+            balance_cents=0,
+            balance_date=date.today(),
+            transactions=txns,
+        )
+    ]
+
+
+# --- F2: posted dedup by count matching ------------------------------------
+
+
+def test_posted_reissued_id_does_not_duplicate(db: Session) -> None:
+    make_synced_account(db)
+    today = date.today()
+
+    engine.apply(db, _one_account([_posted("OLD", today, -500, "COFFEE SHOP")]))
+    db.commit()
+    assert _txn_count(db) == 1
+
+    # Same content, DIFFERENT external_id (a reissued id).
+    result = engine.apply(db, _one_account([_posted("NEW", today, -500, "COFFEE SHOP")]))
+    db.commit()
+    assert result.added == 0
+    rows = list(db.scalars(__import__("sqlalchemy").select(Transaction)))
+    assert len(rows) == 1
+    assert rows[0].external_id == "NEW"  # existing row adopted the new id
+
+
+def test_two_identical_charges_both_survive(db: Session) -> None:
+    make_synced_account(db)
+    today = date.today()
+    payload = _one_account(
+        [_posted("C1", today, -500, "COFFEE SHOP"), _posted("C2", today, -500, "COFFEE SHOP")]
+    )
+
+    first = engine.apply(db, payload)
+    db.commit()
+    assert first.added == 2
+    assert _txn_count(db) == 2  # two genuine identical charges both survive
+
+    second = engine.apply(db, payload)
+    db.commit()
+    assert second.added == 0
+    assert _txn_count(db) == 2  # resync leaves exactly two, not four or one
+
+
+def test_count_matching_inserts_only_the_difference(db: Session) -> None:
+    make_synced_account(db)
+    today = date.today()
+    engine.apply(db, _one_account([_posted("OLD", today, -500, "COFFEE SHOP")]))
+    db.commit()
+
+    # Payload has 3 of the key with fresh ids; DB has 1 -> insert exactly 2.
+    result = engine.apply(
+        db,
+        _one_account(
+            [
+                _posted("N1", today, -500, "COFFEE SHOP"),
+                _posted("N2", today, -500, "COFFEE SHOP"),
+                _posted("N3", today, -500, "COFFEE SHOP"),
+            ]
+        ),
+    )
+    db.commit()
+    assert result.added == 2
+    assert _txn_count(db) == 3
+
+
+# --- F3: run lock + guarded commit -----------------------------------------
+
+
+def test_run_records_ok_and_releases_lock(db: Session) -> None:
+    make_synced_account(db)
+    run = service.run_sync(db, FakeProvider(_accounts_from_fixture()))
+    assert run.status.value == "ok"
+    running = db.scalar(
+        __import__("sqlalchemy").select(__import__("sqlalchemy").func.count())
+        .select_from(SyncRun)
+        .where(SyncRun.status == SyncStatus.running)
+    )
+    assert running == 0  # lock released
+
+
+def test_concurrent_run_is_locked_and_both_recorded(db: Session) -> None:
+    make_synced_account(db)
+    # Simulate an in-flight run holding the lock.
+    inflight = SyncRun(status=SyncStatus.running, started_at=datetime.now(), errors=[])
+    db.add(inflight)
+    db.commit()
+
+    with pytest.raises(service.SyncInProgress):
+        service.run_sync(db, FakeProvider(_accounts_from_fixture()))
+
+    runs = list(db.scalars(__import__("sqlalchemy").select(SyncRun)))
+    statuses = {r.status.value for r in runs}
+    assert "running" in statuses  # the in-flight one
+    assert "failed" in statuses  # the blocked attempt was still recorded
+
+
+# --- F9: constant query count on sync accounts -----------------------------
+
+
+def test_statuses_query_count_is_constant(db: Session) -> None:
+    from sqlalchemy import event
+
+    from app.routers import sync as sync_router
+
+    db.add(
+        Account(
+            name="A1", kind=AccountKind.checking, opening_balance_cents=0,
+            archived=False, sync_source="simplefin", external_id="E1",
+        )
+    )
+    db.commit()
+
+    engine_bind = db.get_bind()
+    count = {"n": 0}
+
+    def _on_exec(*_args):
+        count["n"] += 1
+
+    event.listen(engine_bind, "before_cursor_execute", _on_exec)
+    try:
+        count["n"] = 0
+        sync_router._statuses(db)
+        one_account = count["n"]
+
+        db.add_all(
+            [
+                Account(
+                    name="A2", kind=AccountKind.savings, opening_balance_cents=0,
+                    archived=False, sync_source="simplefin", external_id="E2",
+                ),
+                Account(
+                    name="A3", kind=AccountKind.credit, opening_balance_cents=0,
+                    archived=False, sync_source="simplefin", external_id="E3",
+                ),
+            ]
+        )
+        db.commit()
+
+        count["n"] = 0
+        sync_router._statuses(db)
+        three_accounts = count["n"]
+    finally:
+        event.remove(engine_bind, "before_cursor_execute", _on_exec)
+
+    assert one_account == three_accounts  # no N+1
 
 
 def test_access_url_never_in_formatted_traceback(monkeypatch: pytest.MonkeyPatch) -> None:

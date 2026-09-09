@@ -303,6 +303,7 @@ export interface SyncAccountStatus {
   local_account_name: string | null
   computed_balance_cents: number | null
   last_synced_at: string | null
+  opening_balance_source: string | null
   mismatch: boolean
 }
 

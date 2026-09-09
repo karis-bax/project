@@ -23,6 +23,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -54,9 +55,15 @@ class TxnSource(enum.Enum):
 
 
 class SyncStatus(enum.Enum):
+    running = "running"
     ok = "ok"
     partial = "partial"
     failed = "failed"
+
+
+class OpeningBalanceSource(enum.Enum):
+    entered = "entered"
+    derived_at_link = "derived_at_link"
 
 
 class TimestampMixin:
@@ -97,6 +104,18 @@ class Account(TimestampMixin, Base):
     external_id: Mapped[str | None] = mapped_column(String, nullable=True)
     sync_source: Mapped[str | None] = mapped_column(String, nullable=True)
     last_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+    # How opening_balance_cents was set. ``derived_at_link`` means it was
+    # anchored to the bank's reported balance at link time (not a verified
+    # full-history figure); any later divergence is real signal.
+    opening_balance_source: Mapped[OpeningBalanceSource] = mapped_column(
+        SAEnum(OpeningBalanceSource, name="opening_balance_source"),
+        nullable=False,
+        default=OpeningBalanceSource.entered,
+        server_default="entered",
+    )
+    opening_balance_derived_at: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True
     )
 
@@ -142,6 +161,9 @@ class Transaction(TimestampMixin, Base):
         Index("ix_transactions_date", "date"),
         Index("ix_transactions_account_id_date", "account_id", "date"),
         Index("ix_transactions_category_id", "category_id"),
+        # Content-match key for posted-transaction dedup on resync (see the sync
+        # engine): (account_id, posted_date, amount_cents, normalized_payee).
+        Index("ix_transactions_content_key", "content_key"),
         # SimpleFIN ids are unique only within an account, not globally.
         UniqueConstraint(
             "account_id", "external_id", name="uq_txn_account_external"
@@ -171,6 +193,10 @@ class Transaction(TimestampMixin, Base):
 
     # Provenance and bank-sync fields.
     external_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # (account_id, posted_date, amount_cents, normalized payee) — used to
+    # count-match posted transactions across resyncs without a content-unique
+    # constraint (two genuine identical charges must both survive).
+    content_key: Mapped[str | None] = mapped_column(String, nullable=True)
     source: Mapped[TxnSource] = mapped_column(
         SAEnum(TxnSource, name="txn_source"),
         nullable=False,
@@ -242,6 +268,17 @@ class Goal(TimestampMixin, Base):
 
 class SyncRun(TimestampMixin, Base):
     __tablename__ = "sync_runs"
+    __table_args__ = (
+        # Run lock: at most one run may be in progress at a time. The partial
+        # unique index lets a second concurrent run fail fast (409) instead of
+        # racing into a 500.
+        Index(
+            "uq_sync_run_running",
+            "status",
+            unique=True,
+            sqlite_where=text("status = 'running'"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     started_at: Mapped[datetime] = mapped_column(
