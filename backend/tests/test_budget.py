@@ -30,37 +30,6 @@ def _current_month() -> str:
     return f"{date.today():%Y-%m}"
 
 
-@pytest.fixture
-def db() -> Session:
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(engine)
-    TestingSession = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
-    session = TestingSession()
-    try:
-        yield session
-    finally:
-        session.close()
-        engine.dispose()
-
-
-@pytest.fixture
-def client(db: Session) -> TestClient:
-    def _override_get_db():
-        yield db
-
-    app.dependency_overrides[get_db] = _override_get_db
-    with TestClient(app) as test_client:
-        yield test_client
-    app.dependency_overrides.clear()
-
-
-# --- helpers ---------------------------------------------------------------
-
-
 def make_account(db: Session, name: str = "Checking") -> Account:
     acct = Account(
         name=name, kind=AccountKind.checking, opening_balance_cents=0, archived=False

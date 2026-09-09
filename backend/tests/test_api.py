@@ -28,34 +28,6 @@ from app.models import (
 )
 
 
-@pytest.fixture
-def session() -> Session:
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(engine)
-    TestingSession = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
-    db = TestingSession()
-    try:
-        yield db
-    finally:
-        db.close()
-        engine.dispose()
-
-
-@pytest.fixture
-def client(session: Session) -> TestClient:
-    def _override_get_db():
-        yield session
-
-    app.dependency_overrides[get_db] = _override_get_db
-    with TestClient(app) as test_client:
-        yield test_client
-    app.dependency_overrides.clear()
-
-
 def seed_basics(session: Session) -> tuple[Account, CategoryGroup, Category]:
     account = Account(
         name="Checking", kind=AccountKind.checking, opening_balance_cents=0, archived=False

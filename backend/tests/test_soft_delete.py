@@ -29,31 +29,6 @@ from app.sync import engine as sync_engine
 from app.sync.base import NormalizedAccount, NormalizedTxn
 
 
-@pytest.fixture
-def session() -> Session:
-    eng = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
-    Base.metadata.create_all(eng)
-    db = sessionmaker(bind=eng, expire_on_commit=False, class_=Session)()
-    try:
-        yield db
-    finally:
-        db.close()
-        eng.dispose()
-
-
-@pytest.fixture
-def client(session: Session) -> TestClient:
-    def _override():
-        yield session
-
-    app.dependency_overrides[get_db] = _override
-    with TestClient(app) as c:
-        yield c
-    app.dependency_overrides.clear()
-
-
 def _setup(session: Session):
     month = current_month()
     year, mon = int(month[:4]), int(month[5:7])

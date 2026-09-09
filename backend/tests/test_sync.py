@@ -29,20 +29,6 @@ from app.sync.base import NormalizedAccount, NormalizedTxn, SyncError
 FIXTURE = Path(__file__).parent / "fixtures" / "simplefin_accountset.json"
 
 
-@pytest.fixture
-def db() -> Session:
-    eng = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
-    Base.metadata.create_all(eng)
-    session = sessionmaker(bind=eng, expire_on_commit=False, class_=Session)()
-    try:
-        yield session
-    finally:
-        session.close()
-        eng.dispose()
-
-
 def make_synced_account(db: Session, external_id: str = "ACT-1") -> Account:
     account = Account(
         name="Checking",
