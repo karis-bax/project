@@ -256,6 +256,53 @@ def test_fetch_failure_records_failed_run_without_raising(db: Session) -> None:
     assert run.errors  # message present
 
 
+# --- reconciliation (bank vs ledger) ---------------------------------------
+
+
+def test_reconciliation_reported_vs_computed(db: Session, monkeypatch) -> None:
+    from app.routers import sync as sync_router
+
+    account = make_synced_account(db)
+    # A ledger that sums to -5230.
+    db.add(
+        Transaction(
+            account_id=account.id,
+            external_id="T1",
+            date=date.today(),
+            payee="PUBLIX",
+            amount_cents=-5230,
+            memo="",
+            source=TxnSource.sync,
+        )
+    )
+    db.commit()
+
+    # Bank reports the same balance -> reconciled (no mismatch).
+    monkeypatch.setattr(
+        service,
+        "_DISCOVERED",
+        {
+            "ACT-1": service.Discovered(
+                external_id="ACT-1",
+                name="Checking",
+                org_name="Test Bank",
+                currency="USD",
+                balance_cents=-5230,
+                balance_date=date.today(),
+            )
+        },
+    )
+    [row] = sync_router._statuses(db)
+    assert row.reported_balance_cents == -5230
+    assert row.computed_balance_cents == -5230
+    assert row.mismatch is False
+
+    # Bank reports a different balance -> mismatch flagged.
+    service._DISCOVERED["ACT-1"].balance_cents = -9999
+    [row2] = sync_router._statuses(db)
+    assert row2.mismatch is True
+
+
 # --- credential redaction --------------------------------------------------
 
 _SECRET_URL = "https://user:secretpass@bridge.simplefin.org/simplefin"
