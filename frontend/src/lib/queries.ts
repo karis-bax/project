@@ -219,13 +219,24 @@ export function useUpdateCategory() {
 export function useDeleteCategory() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, reassignTo }: { id: number; reassignTo?: number }) =>
+    // Archiving returns the archive-month + future allocations. If the category
+    // still holds an available balance, pass absorbTo (move it) or discard.
+    mutationFn: ({
+      id,
+      absorbTo,
+      discard,
+    }: {
+      id: number
+      absorbTo?: number
+      discard?: boolean
+    }) =>
       api.del<CategoryRead>(
-        `/categories/${id}${buildQuery({ reassign_to: reassignTo })}`,
+        `/categories/${id}${buildQuery({ absorb_to: absorbTo, discard })}`,
       ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['categories'] })
       qc.invalidateQueries({ queryKey: ['transactions'] })
+      qc.invalidateQueries({ queryKey: ['budget'] })
     },
   })
 }

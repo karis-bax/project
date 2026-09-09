@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from .. import budget as budget_engine
 from .. import schemas
 from ..deps import get_db
-from ..models import Category, CategoryGroup, Transaction
+from ..models import Allocation, Category, CategoryGroup
 
 router = APIRouter(prefix="/api", tags=["categories"])
 
@@ -103,39 +106,78 @@ def update_category(
 @router.delete("/categories/{category_id}", response_model=schemas.CategoryRead)
 def delete_category(
     category_id: int,
-    reassign_to: int | None = None,
+    absorb_to: int | None = None,
+    discard: bool = False,
     db: Session = Depends(get_db),
 ) -> Category:
+    """Archive a category (soft delete), preserving history.
+
+    - Deletes the archive-month and all FUTURE allocations for the category
+      (past allocations stay); this returns that money to left-to-assign.
+    - If the category still holds a non-zero ``available`` balance (carryover
+      from prior months and/or this month's activity) it is NOT silently
+      discarded: returns 409 unless ``?absorb_to=<id>`` (move the balance to
+      another category) or ``?discard=true`` (write it off) is given.
+    - Transactions are left on the archived category so past months are
+      unchanged; ``month_view`` only surfaces the archived category in months
+      where it has activity or an allocation.
+    """
+
     category = _category_or_404(db, category_id)
-    txn_count = db.scalar(
-        select(func.count())
-        .select_from(Transaction)
-        .where(Transaction.category_id == category_id)
+
+    archive_month = f"{date.today():%Y-%m}"
+    previous = budget_engine.previous_month(archive_month)
+    # The envelope balance that deleting current/future allocations cannot
+    # return: carryover from prior (kept) months plus this month's activity.
+    residual = budget_engine.available(db, category, previous) + budget_engine.activity(
+        db, category, archive_month
     )
 
-    if txn_count and reassign_to is None:
+    if residual != 0 and absorb_to is None and not discard:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                f"Category '{category.name}' has {txn_count} transaction(s). "
-                f"Pass ?reassign_to=<category_id> to move them before deleting."
+                f"Category '{category.name}' still has an available balance of "
+                f"${residual / 100:,.2f}. Pass ?absorb_to=<category_id> to move it "
+                f"to another category, or ?discard=true to write it off."
             ),
         )
 
-    if reassign_to is not None:
-        if reassign_to == category_id:
+    if absorb_to is not None:
+        if absorb_to == category_id:
             raise HTTPException(
                 status_code=422,
-                detail="reassign_to must differ from the category being deleted.",
+                detail="absorb_to must differ from the category being archived.",
             )
-        _category_or_404(db, reassign_to)
-        db.execute(
-            update(Transaction)
-            .where(Transaction.category_id == category_id)
-            .values(category_id=reassign_to)
-        )
+        _category_or_404(db, absorb_to)
 
-    # Soft delete: archive rather than hard delete so history is preserved.
+    # 1. Return the archive-month and future allocations (past ones stay).
+    db.execute(
+        delete(Allocation).where(
+            Allocation.category_id == category_id,
+            Allocation.month >= archive_month,
+        )
+    )
+
+    # 2. Move the residual into the target's current month, if absorbing.
+    if absorb_to is not None and residual != 0:
+        existing = db.scalar(
+            select(Allocation).where(
+                Allocation.month == archive_month,
+                Allocation.category_id == absorb_to,
+            )
+        )
+        if existing is None:
+            db.add(
+                Allocation(
+                    month=archive_month,
+                    category_id=absorb_to,
+                    amount_cents=residual,
+                )
+            )
+        else:
+            existing.amount_cents += residual
+
     category.archived = True
     db.commit()
     db.refresh(category)

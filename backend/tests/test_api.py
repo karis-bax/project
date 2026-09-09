@@ -146,13 +146,11 @@ def test_create_category_bad_group_is_404(client: TestClient) -> None:
     assert resp.status_code == 404
 
 
-def test_delete_category_with_transactions_conflicts(
+def test_delete_category_with_available_balance_conflicts(
     client: TestClient, session: Session
 ) -> None:
-    account, group, category = seed_basics(session)
-    other = Category(group_id=group.id, name="Dining", sort_order=1, archived=False)
-    session.add(other)
-    session.flush()
+    account, _group, category = seed_basics(session)
+    # Spending with no allocation leaves a non-zero (overspent) available.
     session.add(
         Transaction(
             account_id=account.id,
@@ -164,17 +162,20 @@ def test_delete_category_with_transactions_conflicts(
     )
     session.commit()
 
-    # 409 names the transaction count.
+    # 409 names the available balance, and nothing is discarded silently.
     conflict = client.delete(f"/api/categories/{category.id}")
     assert conflict.status_code == 409
-    assert "1 transaction" in conflict.json()["detail"]
+    assert "50.00" in conflict.json()["detail"]
 
-    # The escape hatch reassigns then archives.
-    ok = client.delete(f"/api/categories/{category.id}?reassign_to={other.id}")
+    # The explicit write-off escape hatch archives it.
+    ok = client.delete(f"/api/categories/{category.id}?discard=true")
     assert ok.status_code == 200
     assert ok.json()["archived"] is True
-    moved = client.get(f"/api/transactions?category_id={other.id}")
-    assert len(moved.json()["items"]) == 1
+    # Transactions stay put (history preserved), not reassigned.
+    assert (
+        len(client.get(f"/api/transactions?category_id={category.id}").json()["items"])
+        == 1
+    )
 
 
 # --- transactions ----------------------------------------------------------

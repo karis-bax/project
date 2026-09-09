@@ -8,12 +8,14 @@ from __future__ import annotations
 from datetime import date
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app import budget
-from app.db import Base
+from app.db import Base, get_db
+from app.main import app
 from app.models import (
     Account,
     AccountKind,
@@ -22,6 +24,10 @@ from app.models import (
     CategoryGroup,
     Transaction,
 )
+
+
+def _current_month() -> str:
+    return f"{date.today():%Y-%m}"
 
 
 @pytest.fixture
@@ -39,6 +45,17 @@ def db() -> Session:
     finally:
         session.close()
         engine.dispose()
+
+
+@pytest.fixture
+def client(db: Session) -> TestClient:
+    def _override_get_db():
+        yield db
+
+    app.dependency_overrides[get_db] = _override_get_db
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
 
 
 # --- helpers ---------------------------------------------------------------
@@ -248,3 +265,116 @@ def test_category_created_mid_history_has_no_prior_balance(db: Session) -> None:
     assert feb.assigned_cents == 3000
     assert feb.activity_cents == -1000
     assert feb.available_cents == 2000
+
+
+# --- archiving a category (the zombie-category bug) ------------------------
+
+
+def _category_ids_in_view(view: dict) -> list[int]:
+    return [c["id"] for g in view["groups"] for c in g["categories"]]
+
+
+def test_archiving_category_returns_money_and_hides_it(
+    client: TestClient, db: Session
+) -> None:
+    make_account(db)
+    cat = make_category(db, "Subscriptions")
+    month = _current_month()
+
+    pre = client.get(f"/api/budget/{month}").json()["left_to_assign_cents"]
+
+    assigned = client.put(
+        f"/api/budget/{month}/allocations/{cat.id}", json={"amount_cents": 10000}
+    )
+    assert assigned.status_code == 200
+    after_alloc = client.get(f"/api/budget/{month}").json()
+    assert after_alloc["left_to_assign_cents"] == pre - 10000
+
+    deleted = client.delete(f"/api/categories/{cat.id}")
+    assert deleted.status_code == 200
+
+    view = client.get(f"/api/budget/{month}").json()
+    # The archived category must be gone from the current month …
+    assert cat.id not in _category_ids_in_view(view)
+    # … and its allocation returned to left-to-assign.
+    assert view["left_to_assign_cents"] == pre
+
+
+def test_archiving_preserves_past_month_totals(
+    client: TestClient, db: Session
+) -> None:
+    acct = make_account(db)
+    cat = make_category(db, "Dining")
+    # A fully-spent past month (allocation == spending -> zero carryover).
+    allocate(db, cat, "2026-01", 5000)
+    add_txn(db, acct, date(2026, 1, 15), -5000, category=cat)
+    db.commit()
+
+    before = client.get("/api/budget/2026-01").json()
+    deleted = client.delete(f"/api/categories/{cat.id}")
+    assert deleted.status_code == 200  # no residual, so no absorb/discard needed
+    after = client.get("/api/budget/2026-01").json()
+
+    # The archived category still had real activity in January, so that month's
+    # totals and rows must be byte-for-byte identical.
+    assert after == before
+    assert cat.id in _category_ids_in_view(after)
+
+
+def test_archiving_nonzero_available_requires_absorb_or_discard(
+    client: TestClient, db: Session
+) -> None:
+    make_account(db)
+    cat = make_category(db, "Vacation")
+    # $340 assigned in a past month, never spent -> carries into now.
+    allocate(db, cat, "2026-01", 34000)
+    db.commit()
+
+    conflict = client.delete(f"/api/categories/{cat.id}")
+    assert conflict.status_code == 409
+    assert "340.00" in conflict.json()["detail"]
+
+    # Nothing changed: the category is not archived and the allocation remains.
+    assert budget.available(db, cat, _current_month()) == 34000
+
+
+def test_archiving_with_discard_writes_off_balance(
+    client: TestClient, db: Session
+) -> None:
+    make_account(db)
+    cat = make_category(db, "Vacation")
+    allocate(db, cat, "2026-01", 34000)
+    db.commit()
+
+    deleted = client.delete(f"/api/categories/{cat.id}?discard=true")
+    assert deleted.status_code == 200
+    assert deleted.json()["archived"] is True
+    view = client.get(f"/api/budget/{_current_month()}").json()
+    assert cat.id not in _category_ids_in_view(view)
+
+
+def test_archiving_with_absorb_moves_balance_to_target(
+    client: TestClient, db: Session
+) -> None:
+    make_account(db)
+    source = make_category(db, "Vacation")
+    target = make_category(db, "Emergency")
+    allocate(db, source, "2026-01", 34000)
+    db.commit()
+
+    month = _current_month()
+    deleted = client.delete(
+        f"/api/categories/{source.id}?absorb_to={target.id}"
+    )
+    assert deleted.status_code == 200
+
+    view = client.get(f"/api/budget/{month}").json()
+    assert source.id not in _category_ids_in_view(view)
+    target_row = next(
+        c
+        for g in view["groups"]
+        for c in g["categories"]
+        if c["id"] == target.id
+    )
+    # The residual moved into the target's envelope.
+    assert target_row["available_cents"] == 34000
