@@ -89,6 +89,7 @@ def add_txn(
     *,
     category: Category | None = None,
     payee: str = "Test Payee",
+    pending: bool = False,
 ) -> Transaction:
     txn = Transaction(
         account_id=account.id,
@@ -97,7 +98,8 @@ def add_txn(
         payee=payee,
         amount_cents=amount_cents,
         memo="",
-        cleared=True,
+        cleared=not pending,
+        pending=pending,
     )
     db.add(txn)
     db.flush()
@@ -265,6 +267,78 @@ def test_category_created_mid_history_has_no_prior_balance(db: Session) -> None:
     assert feb.assigned_cents == 3000
     assert feb.activity_cents == -1000
     assert feb.available_cents == 2000
+
+
+# --- pending transactions do not affect the budget ------------------------
+
+_M = "2026-05"
+
+
+def test_pending_transaction_does_not_affect_budget(db: Session) -> None:
+    acct = make_account(db)
+    cat = make_category(db, "Groceries")
+    add_txn(db, acct, date(2026, 5, 10), -5000, category=cat, pending=True)
+    add_txn(db, acct, date(2026, 5, 1), 30000, category=None, pending=True)
+
+    assert budget.activity(db, cat, _M) == 0
+    assert budget.available(db, cat, _M) == 0
+    assert budget.income(db, _M) == 0
+    assert budget.left_to_assign(db, _M) == 0
+
+    view = budget.month_view(db, _M)
+    assert view.activity_cents == 0
+    assert view.available_cents == 0
+    assert view.left_to_assign_cents == 0
+
+
+def test_posting_moves_budget_by_the_posted_amount(db: Session) -> None:
+    acct = make_account(db)
+    cat = make_category(db, "Groceries")
+    # A categorized expense moves activity/available; uncategorized income moves
+    # left_to_assign. (In this envelope model a single txn can't move all three.)
+    add_txn(db, acct, date(2026, 5, 10), -5000, category=cat, pending=False)
+    add_txn(db, acct, date(2026, 5, 1), 30000, category=None, pending=False)
+
+    assert budget.activity(db, cat, _M) == -5000
+    assert budget.available(db, cat, _M) == -5000
+    assert budget.income(db, _M) == 30000
+    assert budget.left_to_assign(db, _M) == 30000
+
+
+def test_pending_figure_equals_sum_of_pending_rows(db: Session) -> None:
+    acct = make_account(db)
+    cat = make_category(db, "Dining")
+    add_txn(db, acct, date(2026, 5, 3), -4300, category=cat, pending=True)
+    add_txn(db, acct, date(2026, 5, 8), -1200, category=cat, pending=True)
+    add_txn(db, acct, date(2026, 5, 9), -900, category=cat, pending=False)  # settled
+
+    view = budget.month_view(db, _M)
+    row = find_category_view(view, cat.id)
+    assert row.pending_cents == -5500  # sum of the two pending rows only
+    assert row.activity_cents == -900  # settled money only
+    assert view.pending_cents == -5500
+
+
+def test_month_with_only_pending_has_zero_activity(db: Session) -> None:
+    acct = make_account(db)
+    cat = make_category(db, "Fun")
+    add_txn(db, acct, date(2026, 5, 4), -2500, category=cat, pending=True)
+
+    assert budget.activity(db, cat, _M) == 0
+    assert budget.month_view(db, _M).activity_cents == 0
+
+
+def test_settled_transactions_still_count(db: Session) -> None:
+    # Regression guard: the exclusion targets ONLY pending rows.
+    acct = make_account(db)
+    cat = make_category(db, "Bills")
+    add_txn(db, acct, date(2026, 5, 6), -5000, category=cat, pending=False)
+    add_txn(db, acct, date(2026, 5, 7), -3000, category=cat, pending=True)
+
+    assert budget.activity(db, cat, _M) == -5000  # pending -3000 excluded
+    row = find_category_view(budget.month_view(db, _M), cat.id)
+    assert row.activity_cents == -5000
+    assert row.pending_cents == -3000
 
 
 # --- archiving a category (the zombie-category bug) ------------------------

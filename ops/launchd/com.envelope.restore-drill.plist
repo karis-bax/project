@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.envelope.restore-drill</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/just</string>
+    <string>restore-drill</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/YOU/envelope</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <!-- The drill needs the age identity; keep it out of the backup host. -->
+    <key>BACKUP_AGE_IDENTITY</key>
+    <string>/Users/YOU/.config/envelope/backup_identity.txt</string>
+    <key>BACKUP_DEST</key>
+    <string>s3</string>
+    <key>BACKUP_S3_BUCKET</key>
+    <string>envelope-backups</string>
+    <key>BACKUP_S3_ENDPOINT_URL</key>
+    <string>https://s3.us-west-002.backblazeb2.com</string>
+  </dict>
+
+  <!-- Weekly: Sundays at 03:00. Runs on wake if the Mac was asleep. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key><integer>0</integer>
+    <key>Hour</key><integer>3</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/YOU/Library/Logs/envelope-restore-drill.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOU/Library/Logs/envelope-restore-drill.err.log</string>
+</dict>
+</plist>

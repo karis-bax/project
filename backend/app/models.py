@@ -206,6 +206,9 @@ class Transaction(TimestampMixin, Base):
     pending: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
     )
+    # Soft delete: a set timestamp hides the row from every read path (enforced
+    # at the Session level; see db.py). NULL means live.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     account: Mapped[Account] = relationship(back_populates="transactions")
     category: Mapped[Category | None] = relationship(
@@ -293,5 +296,8 @@ class SyncRun(TimestampMixin, Base):
     )
     added: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     updated: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    swept_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     # errlist entries surfaced from the provider (list of {message, ...}).
     errors: Mapped[list] = mapped_column(JSON, nullable=False, default=list)

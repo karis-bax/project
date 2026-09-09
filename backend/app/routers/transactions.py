@@ -61,6 +61,7 @@ def _apply_filters(
     category_id: int | None,
     q: str | None,
     uncategorized: bool | None,
+    pending: bool | None = None,
 ):
     if month is not None:
         validate_month(month)
@@ -71,6 +72,8 @@ def _apply_filters(
         stmt = stmt.where(Transaction.category_id == category_id)
     if uncategorized:
         stmt = stmt.where(Transaction.category_id.is_(None))
+    if pending is not None:
+        stmt = stmt.where(Transaction.pending.is_(pending))
     if q:
         pattern = f"%{q}%"
         stmt = stmt.where(
@@ -86,6 +89,7 @@ def count_transactions(
     category_id: int | None = None,
     q: str | None = None,
     uncategorized: bool | None = None,
+    pending: bool | None = None,
     db: Session = Depends(get_db),
 ) -> schemas.CountResponse:
     stmt = _apply_filters(
@@ -95,6 +99,7 @@ def count_transactions(
         category_id=category_id,
         q=q,
         uncategorized=uncategorized,
+        pending=pending,
     )
     return schemas.CountResponse(count=int(db.scalar(stmt) or 0))
 
@@ -138,6 +143,7 @@ def list_transactions(
     category_id: int | None = None,
     q: str | None = None,
     uncategorized: bool | None = None,
+    pending: bool | None = None,
     limit: int = Query(100, ge=1, le=500),
     cursor: str | None = None,
     db: Session = Depends(get_db),
@@ -153,6 +159,7 @@ def list_transactions(
         category_id=category_id,
         q=q,
         uncategorized=uncategorized,
+        pending=pending,
     )
 
     if cursor is not None:
@@ -233,9 +240,32 @@ def delete_transaction(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Transaction {transaction_id} not found.",
         )
-    db.delete(txn)
+    # Soft delete: an undo safety net. The row keeps its constraints so a later
+    # re-import/resync can revive it; it vanishes from every read path.
+    txn.deleted_at = dt.datetime.now()
     db.commit()
     return schemas.DeletedResponse(id=transaction_id, deleted=True)
+
+
+@router.post("/{transaction_id}/restore", response_model=schemas.TransactionRead)
+def restore_transaction(
+    transaction_id: int, db: Session = Depends(get_db)
+) -> Transaction:
+    # Must look past the soft-delete filter to find the row to restore.
+    txn = db.scalar(
+        select(Transaction)
+        .where(Transaction.id == transaction_id)
+        .execution_options(include_deleted=True)
+    )
+    if txn is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Transaction {transaction_id} not found.",
+        )
+    txn.deleted_at = None
+    db.commit()
+    db.refresh(txn)
+    return txn
 
 
 @router.post("/bulk-categorize", response_model=schemas.BulkCategorizeResponse)

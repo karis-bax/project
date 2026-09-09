@@ -6,6 +6,7 @@ import { api } from '../../lib/api'
 import { formatCents, formatCentsForInput, parseDollars } from '../../lib/money'
 import { queryKeys } from '../../lib/queries'
 import { useCollapsedGroups } from '../../lib/useCollapsedGroups'
+import { AvailableCell } from './AvailableCell'
 import { neighborId } from './gridNav'
 import type {
   CategoryBudgetRow,
@@ -15,10 +16,6 @@ import type {
 } from '../../lib/types'
 
 const GRID_COLS = 'minmax(0,1fr) 8.5rem 8.5rem 8.5rem'
-
-function clamp01(value: number): number {
-  return Math.max(0, Math.min(1, value))
-}
 
 /** Patch only the edited category's assigned value in the cached budget.
  * Deliberately does NOT touch available, group subtotals, or left_to_assign —
@@ -123,53 +120,6 @@ function AssignedCell({
         }
       }}
     />
-  )
-}
-
-// --- Available cell (color-coded, optional goal meter) ----------------------
-
-function AvailableCell({
-  category,
-  goal,
-}: {
-  category: CategoryBudgetRow
-  goal: GoalRead | undefined
-}) {
-  const cents = category.available_cents
-  const color =
-    cents < 0
-      ? 'text-[var(--warn)]'
-      : cents === 0
-        ? 'text-[var(--fg-subtle)]'
-        : 'text-[var(--fg)]'
-
-  let fill: number | null = null
-  let meterClass = 'bg-[var(--accent-weak)]'
-  if (goal && goal.target_cents > 0) {
-    if (goal.kind === 'savings_target') {
-      fill = clamp01(cents / goal.target_cents)
-      meterClass = 'bg-[var(--accent-weak)]'
-    } else {
-      const spent = -category.activity_cents
-      fill = clamp01(spent / goal.target_cents)
-      meterClass =
-        spent > goal.target_cents ? 'bg-[var(--warn-weak)]' : 'bg-[var(--calm-weak)]'
-    }
-  }
-
-  return (
-    <div className="relative flex items-center justify-end px-2 py-1">
-      {fill !== null && (
-        <div
-          aria-hidden
-          className={`absolute inset-y-1 left-1 rounded-sm ${meterClass}`}
-          style={{ width: `calc(${fill * 100}% - 0.5rem)` }}
-        />
-      )}
-      <span className={`num relative tabular-nums ${color}`}>
-        {formatCents(cents)}
-      </span>
-    </div>
   )
 }
 
@@ -293,6 +243,10 @@ export function EnvelopeGrid({
         <span className="text-right">Activity</span>
         <span className="text-right">Available</span>
       </div>
+      <div className="border-b border-[var(--border)] px-3 py-1 text-[11px] text-[var(--fg-subtle)]">
+        Pending authorizations are shown under Available but are not deducted
+        from it.
+      </div>
 
       {data.groups.map((group) => (
         <GroupSection
@@ -381,6 +335,7 @@ function GroupSection({
             <AvailableCell
               category={category}
               goal={goalByCategory.get(category.id)}
+              month={month}
             />
           </div>
         ))}

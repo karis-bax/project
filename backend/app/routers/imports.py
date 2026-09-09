@@ -65,6 +65,19 @@ def _existing_hashes(db: Session) -> set[str]:
     }
 
 
+def _soft_deleted_by_hash(db: Session) -> dict[str, Transaction]:
+    """Soft-deleted rows keyed by import_hash — candidates to REVIVE so a
+    previously-deleted transaction can come back on re-import."""
+
+    rows = db.scalars(
+        select(Transaction)
+        .where(Transaction.import_hash.is_not(None))
+        .where(Transaction.deleted_at.is_not(None))
+        .execution_options(include_deleted=True)
+    )
+    return {t.import_hash: t for t in rows if t.import_hash}
+
+
 def _columns(batch: StagedBatch) -> list[str]:
     if batch.header:
         return batch.header
@@ -199,6 +212,7 @@ def commit_import(
     account_id = batch.account_id
 
     existing = _existing_hashes(db)
+    revivable = _soft_deleted_by_hash(db)
     seen: set[str] = set()
     imported = skipped_duplicate = failed = 0
     to_add: list[Transaction] = []
@@ -216,14 +230,30 @@ def commit_import(
         if import_hash in existing or import_hash in seen:
             skipped_duplicate += 1
             continue
-        if payload.skip_duplicates and row.is_duplicate:
-            skipped_duplicate += 1
-            continue
 
         try:
             parsed_date = date.fromisoformat(row.date)
         except ValueError:
             failed += 1
+            continue
+
+        # Revive a previously soft-deleted row instead of inserting (and instead
+        # of the unique constraint blocking it forever).
+        revived = revivable.pop(import_hash, None)
+        if revived is not None:
+            revived.deleted_at = None
+            revived.category_id = row.category_id
+            revived.date = parsed_date
+            revived.payee = row.payee
+            revived.amount_cents = row.amount_cents
+            revived.memo = row.memo
+            revived.source = TxnSource.csv
+            seen.add(import_hash)
+            imported += 1
+            continue
+
+        if payload.skip_duplicates and row.is_duplicate:
+            skipped_duplicate += 1
             continue
 
         to_add.append(

@@ -62,6 +62,7 @@ export interface TransactionFilters {
   category_id?: number
   q?: string
   uncategorized?: boolean
+  pending?: boolean
   limit?: number
 }
 
@@ -301,6 +302,15 @@ export function useDeleteTransaction() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => api.del<DeletedResponse>(`/transactions/${id}`),
+    onSuccess: () => invalidateAfterTransactionChange(qc),
+  })
+}
+
+export function useRestoreTransaction() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) =>
+      api.post<TransactionRead>(`/transactions/${id}/restore`),
     onSuccess: () => invalidateAfterTransactionChange(qc),
   })
 }
