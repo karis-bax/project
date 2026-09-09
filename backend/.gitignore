@@ -1,3 +1,5 @@
 
-# Backups (local drill artifacts)
-backups/
+# Backups (local drill artifacts).
+# Leading slash is REQUIRED: a bare `backups/` matches at any depth and
+# silently swallowed the app/backups/ source package (see git history).
+/backups/
