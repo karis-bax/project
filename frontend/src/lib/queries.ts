@@ -14,6 +14,7 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
+  type QueryClient,
 } from '@tanstack/react-query'
 
 import { api } from './api'
@@ -85,6 +86,21 @@ export const queryKeys = {
   insightsTrends: (months: number) => ['insights', 'trends', months] as const,
   insightsBurn: (month: string) => ['insights', 'burn', month] as const,
   insightsRecurring: ['insights', 'recurring'] as const,
+}
+
+/**
+ * Invalidate every query root that reads transaction data. Call this from ANY
+ * mutation that can change transactions (create/update/delete/bulk/import/sync/
+ * rules-apply). When you add a new screen or query that derives from
+ * transaction data, add its root HERE — do not re-list keys per hook, or the
+ * set will drift and screens will show stale data.
+ */
+export function invalidateAfterTransactionChange(qc: QueryClient): void {
+  qc.invalidateQueries({ queryKey: ['transactions'] })
+  qc.invalidateQueries({ queryKey: ['budget'] })
+  qc.invalidateQueries({ queryKey: ['insights'] })
+  qc.invalidateQueries({ queryKey: queryKeys.syncAccounts })
+  qc.invalidateQueries({ queryKey: queryKeys.payees })
 }
 
 function buildQuery(params: Record<string, string | number | boolean | undefined>): string {
@@ -268,10 +284,7 @@ export function useCreateTransaction() {
   return useMutation({
     mutationFn: (body: TransactionCreate) =>
       api.post<TransactionRead>('/transactions', body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['transactions'] })
-      qc.invalidateQueries({ queryKey: ['budget'] })
-    },
+    onSuccess: () => invalidateAfterTransactionChange(qc),
   })
 }
 
@@ -280,10 +293,7 @@ export function useUpdateTransaction() {
   return useMutation({
     mutationFn: ({ id, body }: { id: number; body: TransactionUpdate }) =>
       api.patch<TransactionRead>(`/transactions/${id}`, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['transactions'] })
-      qc.invalidateQueries({ queryKey: ['budget'] })
-    },
+    onSuccess: () => invalidateAfterTransactionChange(qc),
   })
 }
 
@@ -291,10 +301,7 @@ export function useDeleteTransaction() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => api.del<DeletedResponse>(`/transactions/${id}`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['transactions'] })
-      qc.invalidateQueries({ queryKey: ['budget'] })
-    },
+    onSuccess: () => invalidateAfterTransactionChange(qc),
   })
 }
 
@@ -303,10 +310,7 @@ export function useBulkCategorize() {
   return useMutation({
     mutationFn: (body: BulkCategorizeRequest) =>
       api.post<BulkCategorizeResponse>('/transactions/bulk-categorize', body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['transactions'] })
-      qc.invalidateQueries({ queryKey: ['budget'] })
-    },
+    onSuccess: () => invalidateAfterTransactionChange(qc),
   })
 }
 
@@ -320,7 +324,7 @@ export function useMarkTransactionsCleared() {
         ),
       )
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['transactions'] }),
+    onSuccess: () => invalidateAfterTransactionChange(qc),
   })
 }
 
@@ -394,11 +398,7 @@ export function useImportCommit() {
         rows,
         skip_duplicates: skipDuplicates,
       }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['transactions'] })
-      qc.invalidateQueries({ queryKey: ['budget'] })
-      qc.invalidateQueries({ queryKey: queryKeys.payees })
-    },
+    onSuccess: () => invalidateAfterTransactionChange(qc),
   })
 }
 
@@ -444,10 +444,7 @@ export function useApplyRules() {
       api.post<RuleApplyResponse>(
         `/rules/apply${month ? `?month=${month}` : ''}`,
       ),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['transactions'] })
-      qc.invalidateQueries({ queryKey: ['budget'] })
-    },
+    onSuccess: () => invalidateAfterTransactionChange(qc),
   })
 }
 
@@ -497,10 +494,8 @@ export function useRunSync() {
     mutationFn: (days: number = 30) =>
       api.post<SyncRunRead>('/sync/run', { days }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.syncAccounts })
+      invalidateAfterTransactionChange(qc)
       qc.invalidateQueries({ queryKey: queryKeys.syncRuns })
-      qc.invalidateQueries({ queryKey: ['transactions'] })
-      qc.invalidateQueries({ queryKey: ['budget'] })
     },
   })
 }

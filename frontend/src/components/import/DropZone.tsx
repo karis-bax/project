@@ -13,6 +13,9 @@ export function DropZone({ onFile }: { onFile: (file: File) => void }) {
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-label="Choose a bank CSV file"
       onDragOver={(e) => {
         e.preventDefault()
         setDragging(true)
@@ -20,7 +23,13 @@ export function DropZone({ onFile }: { onFile: (file: File) => void }) {
       onDragLeave={() => setDragging(false)}
       onDrop={handleDrop}
       onClick={() => inputRef.current?.click()}
-      className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed px-6 py-14 text-center transition-colors ${
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          inputRef.current?.click()
+        }
+      }}
+      className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed px-6 py-14 text-center outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${
         dragging
           ? 'border-[var(--accent)] bg-[var(--accent-weak)]'
           : 'border-[var(--border-strong)] hover:bg-[var(--row-hover)]'

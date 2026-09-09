@@ -1,4 +1,4 @@
-import { useEffect, useRef, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 
 import { formatCents } from '../../lib/money'
@@ -7,6 +7,11 @@ import type { PayeeSuggestion, TransactionWithRelations } from '../../lib/types'
 import { InlineEditRow } from './InlineEditRow'
 import { QuickAddRow } from './QuickAddRow'
 import { REGISTER_COLS, formatShortDate } from './layout'
+
+export interface ActivateModifiers {
+  shift: boolean
+  meta: boolean
+}
 
 function AmountText({ cents }: { cents: number }) {
   const income = cents > 0
@@ -30,13 +35,29 @@ function DisplayRow({
   txn: TransactionWithRelations
   index: number
   selected: boolean
-  onActivate: (id: number, index: number, e: MouseEvent) => void
+  onActivate: (id: number, index: number, mods: ActivateModifiers) => void
 }) {
   const update = useUpdateTransaction()
+  const activate = (e: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) =>
+    onActivate(txn.id, index, {
+      shift: e.shiftKey,
+      meta: e.metaKey || e.ctrlKey,
+    })
   return (
     <div
-      onClick={(e) => onActivate(txn.id, index, e)}
-      className={`grid cursor-pointer items-center gap-2 border-b border-[var(--border)] px-3 py-1.5 ${
+      role="button"
+      tabIndex={0}
+      aria-label={`Transaction ${txn.payee}, ${formatShortDate(txn.date)}`}
+      onClick={(e) => activate(e)}
+      onKeyDown={(e) => {
+        // Only when the row itself is focused — not the checkbox/link inside it.
+        if (e.target !== e.currentTarget) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault() // Space would otherwise scroll
+          activate(e)
+        }
+      }}
+      className={`grid cursor-pointer items-center gap-2 border-b border-[var(--border)] px-3 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)] ${
         selected ? 'bg-[var(--accent-weak)]' : 'hover:bg-[var(--row-hover)]'
       }`}
       style={{ gridTemplateColumns: REGISTER_COLS }}
@@ -90,7 +111,7 @@ export function Register({
   fetchNextPage: () => void
   selectedIds: Set<number>
   editingId: number | null
-  onActivate: (id: number, index: number, e: MouseEvent) => void
+  onActivate: (id: number, index: number, mods: ActivateModifiers) => void
   onCloseEdit: () => void
   emptyState: ReactNode
 }) {
