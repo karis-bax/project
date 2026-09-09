@@ -537,6 +537,46 @@ def test_insights_trends(client: TestClient, session: Session) -> None:
     assert all("points" in c and len(c["points"]) == 6 for c in body["categories"])
 
 
+def test_insights_trends_flags_outlier_with_reason(
+    client: TestClient, session: Session
+) -> None:
+    from app.insights import add_month, current_month
+
+    account, _group, category = seed_basics(session)
+    cur = current_month()
+    # Roughly ~$100 (with small variance) for five prior months, then a spike.
+    prior = [-9000, -10000, -11000, -9500, -10500]
+    for k in range(1, 6):
+        m = add_month(cur, -k)
+        y, mm = int(m[:4]), int(m[5:7])
+        session.add(
+            Transaction(
+                account_id=account.id,
+                category_id=category.id,
+                date=date(y, mm, 10),
+                payee="Steady",
+                amount_cents=prior[k - 1],
+            )
+        )
+    y, mm = int(cur[:4]), int(cur[5:7])
+    session.add(
+        Transaction(
+            account_id=account.id,
+            category_id=category.id,
+            date=date(y, mm, 5),
+            payee="Spike",
+            amount_cents=-100000,
+        )
+    )
+    session.commit()
+
+    body = client.get("/api/insights/trends?months=6").json()
+    flagged = next(c for c in body["categories"] if c["id"] == category.id)
+    assert flagged["is_outlier"] is True
+    assert flagged["reason"] and "above" in flagged["reason"]
+    assert "σ" in flagged["reason"]
+
+
 def test_insights_burn(client: TestClient, session: Session) -> None:
     _seed_for_insights(session)
     resp = client.get("/api/insights/burn?month=2026-03")

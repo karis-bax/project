@@ -149,13 +149,20 @@ def trends(db: Session, months: int, anchor: str | None = None) -> schemas.Trend
 
         is_outlier = False
         reason: str | None = None
+        direction = "above" if current > mean else "below"
         if stddev > 0 and abs(current - mean) > 1.5 * stddev:
             is_outlier = True
             sigma = abs(current - mean) / stddev
-            direction = "above" if current > mean else "below"
             reason = (
                 f"This month's ${current / 100:,.0f} is {sigma:.1f}σ {direction} "
                 f"your {len(trailing)}-month average of ${mean / 100:,.0f}."
+            )
+        elif stddev == 0 and len(trailing) >= 2 and current != mean:
+            # A perfectly flat history: any change is a break from the pattern.
+            is_outlier = True
+            reason = (
+                f"This month's ${current / 100:,.0f} is {direction} a previously "
+                f"flat ${mean / 100:,.0f} every month."
             )
 
         out.append(
