@@ -29,6 +29,16 @@ aggregate queries (independent of the number of categories or months). It loads
 all allocations, all monthly categorized-activity sums, and all monthly income
 once, then folds forward in Python. It never issues one query per category and
 never walks backward one month at a time.
+
+Archived categories — display rule:
+  A non-archived category always appears in ``month_view``. An **archived**
+  category appears **only in months where it has non-zero activity or a non-zero
+  allocation**. This preserves history (a past month that had real spending in a
+  since-archived category still shows it, so that month's totals and the
+  carryover fold never change) while keeping an emptied, archived category out of
+  the current and future months. Archiving itself (in the categories router)
+  deletes the archive-month and future allocations, which is what makes the
+  category disappear from those months here.
 """
 
 from __future__ import annotations
@@ -291,6 +301,12 @@ def month_view(db: Session, month: str) -> MonthView:
             c_assigned = assigned_map.get((month, cat.id), 0)
             c_activity = activity_map.get((month, cat.id), 0)
             c_available = available_by_cat[cat.id]
+            # Archived categories only surface in months where they had real
+            # activity or an allocation (see the module docstring). This keeps a
+            # since-archived category in the months it actually mattered without
+            # letting an emptied one linger in the current/future months.
+            if cat.archived and c_assigned == 0 and c_activity == 0:
+                continue
             cat_views.append(
                 CategoryView(
                     id=cat.id,
