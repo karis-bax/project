@@ -41,6 +41,12 @@ export function parseDollars(input: string): number {
   const unsigned = negative ? cleaned.slice(1) : cleaned
   const [whole, frac = ''] = unsigned.split('.')
 
+  // Number(whole) * 100 loses precision beyond 2^53; reject rather than
+  // silently corrupt. 15 digits keeps whole-dollar cents within safe integers.
+  if (whole.replace(/^0+/, '').length > 15) {
+    throw new Error('Amount is too large.')
+  }
+
   const wholeCents = Number(whole) * 100
 
   let fracCents = 0
@@ -54,6 +60,21 @@ export function parseDollars(input: string): number {
 
   const total = wholeCents + fracCents
   return negative ? -total : total
+}
+
+/**
+ * Render integer cents as a plain, editable dollar string ("-40", "0.05",
+ * "1234.56") using integer division + remainder — never float division — so the
+ * whole money path stays on the exact-string discipline. Whole-dollar amounts
+ * omit the decimals; sub-dollar and fractional amounts pad to two digits.
+ */
+export function formatCentsForInput(cents: number): string {
+  const negative = cents < 0
+  const abs = Math.abs(cents)
+  const whole = Math.trunc(abs / 100)
+  const frac = abs % 100
+  const body = frac === 0 ? `${whole}` : `${whole}.${String(frac).padStart(2, '0')}`
+  return negative ? `-${body}` : body
 }
 
 /**

@@ -11,6 +11,7 @@ never called on them.
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import urllib.error
 import urllib.request
@@ -58,9 +59,24 @@ def _split_credentials(access_url: str) -> tuple[str, str, str]:
 
 
 def decode_setup_token(setup_token: str) -> str:
-    """A setup token is a base64-encoded claim URL."""
+    """A setup token is a base64-encoded claim URL.
 
-    return base64.b64decode(setup_token).decode("utf-8").strip()
+    Raises ``SetupTokenError`` (not a raw 500) for anything malformed: not
+    base64, base64 that isn't UTF-8, or text that isn't an http(s) URL.
+    """
+
+    try:
+        decoded = base64.b64decode(setup_token, validate=True).decode("utf-8")
+    except (binascii.Error, ValueError):
+        raise SetupTokenError("Setup token is not valid base64.") from None
+    except UnicodeDecodeError:
+        raise SetupTokenError("Setup token did not decode to UTF-8 text.") from None
+
+    claim_url = decoded.strip()
+    parts = urlsplit(claim_url)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        raise SetupTokenError("Setup token did not decode to a valid URL.")
+    return claim_url
 
 
 def claim_setup_token(setup_token: str) -> str:
