@@ -6,11 +6,11 @@ import base64
 import datetime as dt
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from .. import schemas
-from ..deps import get_db, validate_month
+from ..deps import get_db, get_live_or_404, validate_month
 from ..models import Account, Category, Transaction
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
@@ -34,23 +34,11 @@ def _decode_cursor(cursor: str) -> tuple[dt.date, int]:
 
 
 def _account_or_404(db: Session, account_id: int) -> Account:
-    account = db.get(Account, account_id)
-    if account is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Account {account_id} not found.",
-        )
-    return account
+    return get_live_or_404(db, Account, account_id, label="Account")
 
 
 def _category_or_404(db: Session, category_id: int) -> Category:
-    category = db.get(Category, category_id)
-    if category is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Category {category_id} not found.",
-        )
-    return category
+    return get_live_or_404(db, Category, category_id, label="Category")
 
 
 def _apply_filters(
@@ -212,12 +200,7 @@ def update_transaction(
     payload: schemas.TransactionUpdate,
     db: Session = Depends(get_db),
 ) -> Transaction:
-    txn = db.get(Transaction, transaction_id)
-    if txn is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Transaction {transaction_id} not found.",
-        )
+    txn = get_live_or_404(db, Transaction, transaction_id, label="Transaction")
     data = payload.model_dump(exclude_unset=True)
     if data.get("account_id") is not None:
         _account_or_404(db, data["account_id"])
@@ -234,12 +217,11 @@ def update_transaction(
 def delete_transaction(
     transaction_id: int, db: Session = Depends(get_db)
 ) -> schemas.DeletedResponse:
-    txn = db.get(Transaction, transaction_id)
-    if txn is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Transaction {transaction_id} not found.",
-        )
+    # get_live_or_404 excludes already-deleted rows, so a second DELETE is a
+    # 404 and cannot re-stamp deleted_at. Re-stamping would reset the retention
+    # clock that scripts/purge_soft_deleted.py reads, keeping a row alive
+    # indefinitely.
+    txn = get_live_or_404(db, Transaction, transaction_id, label="Transaction")
     # Soft delete: an undo safety net. The row keeps its constraints so a later
     # re-import/resync can revive it; it vanishes from every read path.
     txn.deleted_at = dt.datetime.now()
@@ -276,10 +258,12 @@ def bulk_categorize(
         _category_or_404(db, payload.category_id)
     if not payload.ids:
         return schemas.BulkCategorizeResponse(updated=0)
-    result = db.execute(
-        update(Transaction)
-        .where(Transaction.id.in_(payload.ids))
-        .values(category_id=payload.category_id)
-    )
+    # Loaded and modified through the ORM rather than a bulk UPDATE so the
+    # session-level filters apply. `updated` is therefore rows actually
+    # changed: ids that are soft-deleted (or, later, not the caller's) are
+    # silently not counted, which is the honest number.
+    rows = list(db.scalars(select(Transaction).where(Transaction.id.in_(payload.ids))))
+    for txn in rows:
+        txn.category_id = payload.category_id
     db.commit()
-    return schemas.BulkCategorizeResponse(updated=result.rowcount or 0)
+    return schemas.BulkCategorizeResponse(updated=len(rows))

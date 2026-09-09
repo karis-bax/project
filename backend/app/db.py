@@ -46,16 +46,27 @@ class Base(DeclarativeBase):
 
 @event.listens_for(Session, "do_orm_execute")
 def _filter_soft_deleted(state: ORMExecuteState) -> None:
-    """Exclude soft-deleted transactions from EVERY ORM read, in one place.
+    """Exclude soft-deleted transactions from every ORM read AND write.
 
-    Using ``with_loader_criteria`` at the Session level makes an unfiltered read
-    impossible by construction — no scattered ``.where(deleted_at.is_(None))``
-    to forget. Callers that must see soft-deleted rows (restore, revive, purge)
-    pass ``execution_options(include_deleted=True)``. (This is the same
-    mechanism a future multi-tenant auth layer would use for row scoping.)
+    Using ``with_loader_criteria`` at the Session level makes an unfiltered
+    statement impossible by construction — no scattered
+    ``.where(deleted_at.is_(None))`` to forget. Callers that must see
+    soft-deleted rows (restore, revive, purge) pass
+    ``execution_options(include_deleted=True)``. (This is the same mechanism a
+    future multi-tenant auth layer would use for row scoping.)
+
+    This applies to ORM-enabled UPDATE and DELETE as well as SELECT. It used to
+    be gated on ``state.is_select``, which meant every bulk write escaped the
+    filter: ``POST /api/transactions/bulk-categorize`` would happily
+    re-categorize a soft-deleted transaction.
+
+    INSERT is deliberately not covered — there is nothing to constrain on an
+    insert, and ``with_loader_criteria`` has no meaning there. Statements that
+    insert into a filtered table must carry their own correctness (see the
+    Allocation upsert in routers/budget.py).
     """
 
-    if not state.is_select or state.execution_options.get(INCLUDE_DELETED):
+    if state.is_insert or state.execution_options.get(INCLUDE_DELETED):
         return
     # Imported lazily to avoid a circular import (models imports Base).
     from .models import Transaction

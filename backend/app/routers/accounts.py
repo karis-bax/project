@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import schemas
-from ..deps import get_db
+from ..deps import get_db, get_live_or_404
 from ..models import Account
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
@@ -35,13 +35,7 @@ def create_account(
 
 
 def _get_or_404(db: Session, account_id: int) -> Account:
-    account = db.get(Account, account_id)
-    if account is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Account {account_id} not found.",
-        )
-    return account
+    return get_live_or_404(db, Account, account_id, label="Account")
 
 
 @router.patch("/{account_id}", response_model=schemas.AccountRead)
