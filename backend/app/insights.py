@@ -10,6 +10,7 @@ import calendar
 import statistics
 from collections import Counter, defaultdict
 from datetime import date, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -19,6 +20,23 @@ from .importer import normalize_payee
 from .models import Category, CategoryGroup, Transaction
 
 _MONTH = "%Y-%m"
+
+
+def _mean_cents(values: list[int]) -> int:
+    """Mean of integer cents via Decimal (exact), rounded half-up to cents."""
+
+    if not values:
+        return 0
+    quotient = Decimal(sum(values)) / Decimal(len(values))
+    return int(quotient.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def _dollars(cents: int) -> str:
+    """Format cents as a whole-dollar string (e.g. "$1,234") without float math."""
+
+    sign = "-" if cents < 0 else ""
+    dollars = int((Decimal(abs(cents)) / 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    return f"{sign}${dollars:,}"
 
 
 def add_month(month: str, delta: int) -> str:
@@ -144,25 +162,27 @@ def trends(db: Session, months: int, anchor: str | None = None) -> schemas.Trend
         ]
         trailing = [p.spent_cents for p in points[:-1]]
         current = points[-1].spent_cents
-        mean = statistics.mean(trailing) if trailing else 0
+        # Money mean via exact integer arithmetic (never float on cents).
+        mean_cents = _mean_cents(trailing)
+        # Dispersion is a statistical threshold, not a displayed money figure.
         stddev = statistics.pstdev(trailing) if len(trailing) >= 2 else 0.0
 
         is_outlier = False
         reason: str | None = None
-        direction = "above" if current > mean else "below"
-        if stddev > 0 and abs(current - mean) > 1.5 * stddev:
+        direction = "above" if current > mean_cents else "below"
+        if stddev > 0 and abs(current - mean_cents) > 1.5 * stddev:
             is_outlier = True
-            sigma = abs(current - mean) / stddev
+            sigma = abs(current - mean_cents) / stddev
             reason = (
-                f"This month's ${current / 100:,.0f} is {sigma:.1f}σ {direction} "
-                f"your {len(trailing)}-month average of ${mean / 100:,.0f}."
+                f"This month's {_dollars(current)} is {sigma:.1f}σ {direction} "
+                f"your {len(trailing)}-month average of {_dollars(mean_cents)}."
             )
-        elif stddev == 0 and len(trailing) >= 2 and current != mean:
+        elif stddev == 0 and len(trailing) >= 2 and current != mean_cents:
             # A perfectly flat history: any change is a break from the pattern.
             is_outlier = True
             reason = (
-                f"This month's ${current / 100:,.0f} is {direction} a previously "
-                f"flat ${mean / 100:,.0f} every month."
+                f"This month's {_dollars(current)} is {direction} a previously "
+                f"flat {_dollars(mean_cents)} every month."
             )
 
         out.append(
@@ -171,7 +191,7 @@ def trends(db: Session, months: int, anchor: str | None = None) -> schemas.Trend
                 name=cat.name,
                 points=points,
                 current_month=anchor,
-                mean_cents=round(mean),
+                mean_cents=mean_cents,
                 stddev_cents=round(stddev),
                 is_outlier=is_outlier,
                 reason=reason,
@@ -285,7 +305,7 @@ def recurring(db: Session) -> schemas.RecurringResponse:
         if not within_10:
             continue
 
-        avg = round(statistics.mean(amounts))
+        avg = _mean_cents(amounts)
         cadence = round(statistics.median(monthly_gaps)) or 30
         last_date = dates[-1]
         next_date = last_date + timedelta(days=cadence)
