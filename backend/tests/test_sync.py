@@ -323,6 +323,25 @@ def test_redact_scrubs_access_url(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "secretpass" not in redacted
 
 
+def test_setup_token_decode_rejects_bad_input() -> None:
+    import base64
+
+    from app.sync.simplefin import SetupTokenError, decode_setup_token
+
+    # Not base64 at all.
+    with pytest.raises(SetupTokenError):
+        decode_setup_token("!!! not base64 !!!")
+    # Valid base64, but not UTF-8.
+    with pytest.raises(SetupTokenError):
+        decode_setup_token(base64.b64encode(b"\xff\xfe").decode())
+    # Valid UTF-8, but not a URL.
+    with pytest.raises(SetupTokenError):
+        decode_setup_token(base64.b64encode(b"hello there").decode())
+    # A real URL decodes fine.
+    good = base64.b64encode(b"https://bridge.simplefin.org/claim/abc").decode()
+    assert decode_setup_token(good) == "https://bridge.simplefin.org/claim/abc"
+
+
 def _txn_count(db: Session) -> int:
     from sqlalchemy import func, select
 

@@ -439,6 +439,13 @@ def test_import_preview_and_commit(client: TestClient, session: Session) -> None
     assert commit2.json()["skipped_duplicate"] == 2
 
 
+def test_sync_claim_bad_token_is_400(client: TestClient) -> None:
+    # Malformed setup token must be a clean 400, never a 500.
+    resp = client.post("/api/sync/claim", json={"setup_token": "!!! not base64 !!!"})
+    assert resp.status_code == 400
+    assert "base64" in resp.json()["detail"].lower()
+
+
 def test_import_preview_bad_account_is_404(client: TestClient) -> None:
     resp = client.post(
         "/api/import/preview",
