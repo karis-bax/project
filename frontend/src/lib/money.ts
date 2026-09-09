@@ -41,6 +41,12 @@ export function parseDollars(input: string): number {
   const unsigned = negative ? cleaned.slice(1) : cleaned
   const [whole, frac = ''] = unsigned.split('.')
 
+  // Number(whole) * 100 loses precision beyond 2^53; reject rather than
+  // silently corrupt. 15 digits keeps whole-dollar cents within safe integers.
+  if (whole.replace(/^0+/, '').length > 15) {
+    throw new Error('Amount is too large.')
+  }
+
   const wholeCents = Number(whole) * 100
 
   let fracCents = 0

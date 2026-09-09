@@ -62,6 +62,12 @@ describe('parseDollars', () => {
     expect(() => parseDollars('')).toThrow()
     expect(() => parseDollars('$')).toThrow()
   })
+
+  it('rejects integer parts beyond 15 digits rather than losing precision', () => {
+    expect(() => parseDollars('9999999999999999')).toThrow(/too large/)
+    // 15 digits is still accepted.
+    expect(parseDollars('999999999999999')).toBe(99999999999999900)
+  })
 })
 
 describe('formatCents', () => {
