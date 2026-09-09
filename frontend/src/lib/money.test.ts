@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatCents, parseAmountInput, parseDollars } from './money'
+import {
+  formatCents,
+  formatCentsForInput,
+  parseAmountInput,
+  parseDollars,
+} from './money'
 
 describe('parseDollars', () => {
   it('parses plain integers', () => {
@@ -70,6 +75,31 @@ describe('formatCents', () => {
     expect(formatCents(1250, { sign: true })).toBe('+$12.50')
     expect(formatCents(-4000, { sign: true })).toBe('-$40.00')
     expect(formatCents(0, { sign: true })).toBe('$0.00')
+  })
+})
+
+describe('formatCentsForInput', () => {
+  it('renders whole dollars without decimals', () => {
+    expect(formatCentsForInput(2150000)).toBe('21500')
+    expect(formatCentsForInput(0)).toBe('0')
+  })
+
+  it('renders fractional and sub-dollar amounts with two digits', () => {
+    expect(formatCentsForInput(2150)).toBe('21.50')
+    expect(formatCentsForInput(5)).toBe('0.05')
+    expect(formatCentsForInput(60)).toBe('0.60')
+  })
+
+  it('handles negatives', () => {
+    expect(formatCentsForInput(-4000)).toBe('-40')
+    expect(formatCentsForInput(-5)).toBe('-0.05')
+    expect(formatCentsForInput(-12345)).toBe('-123.45')
+  })
+
+  it('round-trips through parseDollars', () => {
+    for (const c of [0, 5, -5, 60, 2150, -12345, 2150000]) {
+      expect(parseDollars(formatCentsForInput(c))).toBe(c)
+    }
   })
 })
 

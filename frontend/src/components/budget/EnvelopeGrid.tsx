@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { api } from '../../lib/api'
-import { formatCents, parseDollars } from '../../lib/money'
+import { formatCents, formatCentsForInput, parseDollars } from '../../lib/money'
 import { queryKeys } from '../../lib/queries'
 import { useCollapsedGroups } from '../../lib/useCollapsedGroups'
 import { neighborId } from './gridNav'
@@ -15,10 +15,6 @@ import type {
 } from '../../lib/types'
 
 const GRID_COLS = 'minmax(0,1fr) 8.5rem 8.5rem 8.5rem'
-
-function dollarsString(cents: number): string {
-  return (cents / 100).toString()
-}
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value))
@@ -88,7 +84,7 @@ function AssignedCell({
       className="num w-full rounded border border-transparent bg-transparent px-2 py-1 text-right tabular-nums text-[var(--fg)] hover:border-[var(--border)] focus:border-[var(--accent)] focus:bg-[var(--panel-raised)] focus:outline-none"
       value={display}
       onFocus={(e) => {
-        setDraft(dollarsString(category.assigned_cents))
+        setDraft(formatCentsForInput(category.assigned_cents))
         const el = e.currentTarget
         requestAnimationFrame(() => el.select())
       }}

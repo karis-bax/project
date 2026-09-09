@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import { parseDollars } from '../../lib/money'
+import { formatCentsForInput, parseDollars } from '../../lib/money'
 import {
   useDeleteTransaction,
   useUpdateTransaction,
@@ -27,7 +27,7 @@ export function InlineEditRow({
     transaction.category_id,
   )
   const [memo, setMemo] = useState(transaction.memo)
-  const [amount, setAmount] = useState((transaction.amount_cents / 100).toString())
+  const [amount, setAmount] = useState(formatCentsForInput(transaction.amount_cents))
   const [cleared, setCleared] = useState(transaction.cleared)
   const [error, setError] = useState<string | null>(null)
 

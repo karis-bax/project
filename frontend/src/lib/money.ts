@@ -57,6 +57,21 @@ export function parseDollars(input: string): number {
 }
 
 /**
+ * Render integer cents as a plain, editable dollar string ("-40", "0.05",
+ * "1234.56") using integer division + remainder — never float division — so the
+ * whole money path stays on the exact-string discipline. Whole-dollar amounts
+ * omit the decimals; sub-dollar and fractional amounts pad to two digits.
+ */
+export function formatCentsForInput(cents: number): string {
+  const negative = cents < 0
+  const abs = Math.abs(cents)
+  const whole = Math.trunc(abs / 100)
+  const frac = abs % 100
+  const body = frac === 0 ? `${whole}` : `${whole}.${String(frac).padStart(2, '0')}`
+  return negative ? `-${body}` : body
+}
+
+/**
  * Parse a quick-add amount into signed integer cents. The default sign is
  * negative (an outflow); a leading "+" marks an inflow (income). Accepts the
  * same formatting as parseDollars ("12.50", "-40", "1,234.56", "+1,234.56").
