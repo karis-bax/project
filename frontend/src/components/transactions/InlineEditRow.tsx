@@ -13,10 +13,12 @@ export function InlineEditRow({
   transaction,
   payees,
   onClose,
+  onDeleted,
 }: {
   transaction: TransactionWithRelations
   payees: PayeeSuggestion[]
   onClose: () => void
+  onDeleted?: (id: number, payee: string) => void
 }) {
   const update = useUpdateTransaction()
   const remove = useDeleteTransaction()
@@ -123,7 +125,14 @@ export function InlineEditRow({
           {error && <span className="text-[var(--warn)]">{error}</span>}
           <button
             type="button"
-            onClick={() => remove.mutate(transaction.id, { onSuccess: onClose })}
+            onClick={() =>
+              remove.mutate(transaction.id, {
+                onSuccess: () => {
+                  onDeleted?.(transaction.id, transaction.payee)
+                  onClose()
+                },
+              })
+            }
             className="rounded border border-[var(--border-strong)] px-3 py-1.5 text-[var(--warn)] hover:bg-[var(--warn-weak)]"
           >
             Delete

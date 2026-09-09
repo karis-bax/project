@@ -390,6 +390,7 @@ class SyncRunRead(ORMModel):
     accounts_synced: int
     added: int
     updated: int
+    swept_count: int = 0
     errors: list = []
 
 

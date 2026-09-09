@@ -112,6 +112,7 @@ def run_sync(
         run.accounts_synced = result.accounts_synced
         run.added = result.added
         run.updated = result.updated
+        run.swept_count = result.deleted
         run.errors = errlist
         run.finished_at = datetime.now()
         db.commit()

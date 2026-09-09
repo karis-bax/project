@@ -5,6 +5,7 @@ import { ApiError } from '../lib/api'
 import {
   useTransactions,
   usePayees,
+  useRestoreTransaction,
   type TransactionFilters,
 } from '../lib/queries'
 import { EmptyState, ErrorState, SkeletonRows } from '../components/ui'
@@ -46,9 +47,11 @@ export function TransactionsPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [anchorIndex, setAnchorIndex] = useState<number | null>(null)
   const [editingId, setEditingId] = useState<number | null>(null)
+  const [undo, setUndo] = useState<{ id: number; payee: string } | null>(null)
 
   const query = useTransactions({ ...filters, limit: 100 })
   const payees = usePayees()
+  const restore = useRestoreTransaction()
 
   const items = useMemo(
     () => query.data?.pages.flatMap((page) => page.items) ?? [],
@@ -89,6 +92,27 @@ export function TransactionsPage() {
     <div className="mx-auto flex max-w-5xl flex-col gap-3">
       <FilterBar filters={filters} onChange={setFilters} />
 
+      {undo && (
+        <div
+          role="status"
+          className="flex items-center justify-between rounded border border-[var(--border-strong)] bg-[var(--row-hover)] px-3 py-2 text-sm"
+        >
+          <span>
+            Deleted <span className="font-medium">{undo.payee}</span>.
+          </span>
+          <button
+            type="button"
+            onClick={() =>
+              restore.mutate(undo.id, { onSettled: () => setUndo(null) })
+            }
+            disabled={restore.isPending}
+            className="rounded border border-[var(--border-strong)] px-3 py-1 text-[var(--accent)] hover:bg-[var(--bg)]"
+          >
+            Undo
+          </button>
+        </div>
+      )}
+
       {selectedIds.size > 0 && (
         <SelectionBar
           selectedIds={[...selectedIds]}
@@ -117,6 +141,7 @@ export function TransactionsPage() {
           editingId={editingId}
           onActivate={onActivate}
           onCloseEdit={() => setEditingId(null)}
+          onDeleted={(id, payee) => setUndo({ id, payee })}
           emptyState={
             <EmptyState
               title="No transactions match"

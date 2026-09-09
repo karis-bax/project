@@ -240,9 +240,32 @@ def delete_transaction(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Transaction {transaction_id} not found.",
         )
-    db.delete(txn)
+    # Soft delete: an undo safety net. The row keeps its constraints so a later
+    # re-import/resync can revive it; it vanishes from every read path.
+    txn.deleted_at = dt.datetime.now()
     db.commit()
     return schemas.DeletedResponse(id=transaction_id, deleted=True)
+
+
+@router.post("/{transaction_id}/restore", response_model=schemas.TransactionRead)
+def restore_transaction(
+    transaction_id: int, db: Session = Depends(get_db)
+) -> Transaction:
+    # Must look past the soft-delete filter to find the row to restore.
+    txn = db.scalar(
+        select(Transaction)
+        .where(Transaction.id == transaction_id)
+        .execution_options(include_deleted=True)
+    )
+    if txn is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Transaction {transaction_id} not found.",
+        )
+    txn.deleted_at = None
+    db.commit()
+    db.refresh(txn)
+    return txn
 
 
 @router.post("/bulk-categorize", response_model=schemas.BulkCategorizeResponse)

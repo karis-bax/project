@@ -319,6 +319,7 @@ export interface SyncRunRead {
   accounts_synced: number
   added: number
   updated: number
+  swept_count: number
   errors: unknown[]
 }
 

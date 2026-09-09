@@ -306,6 +306,15 @@ export function useDeleteTransaction() {
   })
 }
 
+export function useRestoreTransaction() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) =>
+      api.post<TransactionRead>(`/transactions/${id}/restore`),
+    onSuccess: () => invalidateAfterTransactionChange(qc),
+  })
+}
+
 export function useBulkCategorize() {
   const qc = useQueryClient()
   return useMutation({

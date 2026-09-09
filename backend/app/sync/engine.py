@@ -87,7 +87,12 @@ def _find_pending_match(
     best: Transaction | None = None
     best_delta = None
     for row in candidates:
-        if row.id in matched or not row.pending or row.source != TxnSource.sync:
+        if (
+            row.id in matched
+            or not row.pending
+            or row.source != TxnSource.sync
+            or row.deleted_at is not None
+        ):
             continue
         if abs((nt.posted_date - row.date).days) > _PENDING_MATCH_DAYS:
             continue
@@ -122,8 +127,14 @@ def apply(
             continue  # discovered but not linked yet
         result.accounts_synced += 1
 
+        # Include soft-deleted rows: a resync that matches one should REVIVE it
+        # (clear deleted_at) rather than insert a duplicate or hit a constraint.
         existing = list(
-            db.scalars(select(Transaction).where(Transaction.account_id == local.id))
+            db.scalars(
+                select(Transaction)
+                .where(Transaction.account_id == local.id)
+                .execution_options(include_deleted=True)
+            )
         )
         by_ext = {t.external_id: t for t in existing if t.external_id}
         matched: set[int] = set()
@@ -154,6 +165,8 @@ def apply(
             row = by_ext.get(nt.external_id)
             if row is not None:
                 # external_id match: normal update path (owns amount/date/desc/pending).
+                if row.deleted_at is not None:
+                    row.deleted_at = None  # revive
                 _apply_sync_fields(row, nt)
                 if row.id is not None:
                     matched.add(row.id)
@@ -199,6 +212,8 @@ def apply(
             bucket = pool.get(key)
             if bucket:
                 row = bucket.pop(0)
+                if row.deleted_at is not None:
+                    row.deleted_at = None  # revive a previously-deleted posted row
                 row.external_id = nt.external_id
                 _apply_sync_fields(row, nt)
                 matched.add(row.id)
@@ -206,11 +221,17 @@ def apply(
             else:
                 _insert(nt)
 
-        # Delete pending sync rows that never posted and are now stale.
+        # Soft-delete pending sync rows that never posted and are now stale
+        # (rides the same mechanism as user deletes; not a hard delete).
         cutoff = today - timedelta(days=_STALE_PENDING_DAYS)
         for t in existing:
-            if t.source == TxnSource.sync and t.pending and t.date < cutoff:
-                db.delete(t)
+            if (
+                t.source == TxnSource.sync
+                and t.pending
+                and t.deleted_at is None
+                and t.date < cutoff
+            ):
+                t.deleted_at = now
                 result.deleted += 1
 
         local.last_synced_at = now
