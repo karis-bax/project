@@ -386,3 +386,87 @@ class SyncRunRead(ORMModel):
     added: int
     updated: int
     errors: list = []
+
+
+# --- Insights --------------------------------------------------------------
+
+
+class CategorySpend(BaseModel):
+    id: int
+    name: str
+    spent_cents: int
+    compare_cents: int
+
+
+class GroupSpend(BaseModel):
+    id: int
+    name: str
+    spent_cents: int
+    compare_cents: int
+    categories: list[CategorySpend]
+
+
+class ByCategoryResponse(BaseModel):
+    month: str
+    compare_to: str
+    total_spent_cents: int
+    total_compare_cents: int
+    groups: list[GroupSpend]
+
+
+class TrendPoint(BaseModel):
+    month: str
+    spent_cents: int
+
+
+class TrendCategory(BaseModel):
+    id: int
+    name: str
+    points: list[TrendPoint]
+    current_month: str
+    mean_cents: int
+    stddev_cents: int
+    is_outlier: bool
+    reason: str | None = None
+
+
+class TrendsResponse(BaseModel):
+    months: list[str]
+    categories: list[TrendCategory]
+
+
+class BurnPoint(BaseModel):
+    day: int
+    cumulative_cents: int
+
+
+class BurnSeries(BaseModel):
+    month: str
+    points: list[BurnPoint]
+
+
+class BurnResponse(BaseModel):
+    month: str
+    days_in_month: int
+    as_of_day: int
+    current: list[BurnPoint]
+    history: list[BurnSeries]
+    projected_total_cents: int | None = None
+    assumption: str
+
+
+class RecurringItem(BaseModel):
+    payee: str
+    category_id: int | None = None
+    category_name: str | None = None
+    average_amount_cents: int
+    cadence_days: int
+    occurrences: int
+    last_date: str
+    next_expected_date: str
+    next_expected_amount_cents: int
+
+
+class RecurringResponse(BaseModel):
+    items: list[RecurringItem]
+    total_committed_monthly_cents: int
