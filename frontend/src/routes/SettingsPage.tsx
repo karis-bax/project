@@ -46,6 +46,12 @@ export function SettingsPage() {
             Auto-categorize transactions by payee or memo.
           </p>
         </Link>
+        <Link to="/settings/sync" className={card}>
+          <p className="font-medium text-[var(--fg)]">Bank sync</p>
+          <p className="text-[var(--fg-muted)]">
+            Live balances via SimpleFIN, with ledger reconciliation.
+          </p>
+        </Link>
       </div>
     </div>
   )

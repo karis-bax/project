@@ -8,6 +8,7 @@ import { ImportPage } from './routes/ImportPage'
 import { InsightsPage } from './routes/InsightsPage'
 import { RulesPage } from './routes/RulesPage'
 import { SettingsPage } from './routes/SettingsPage'
+import { SyncPage } from './routes/SyncPage'
 import { TransactionsPage } from './routes/TransactionsPage'
 
 export default function App() {
@@ -25,6 +26,7 @@ export default function App() {
           <Route path="settings" element={<SettingsPage />} />
           <Route path="settings/import" element={<ImportPage />} />
           <Route path="settings/rules" element={<RulesPage />} />
+          <Route path="settings/sync" element={<SyncPage />} />
           <Route
             path="*"
             element={
