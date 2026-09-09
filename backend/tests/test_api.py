@@ -407,6 +407,17 @@ def test_import_preview_and_commit(client: TestClient, session: Session) -> None
     assert commit.status_code == 200
     assert commit.json() == {"imported": 2, "skipped_duplicate": 0, "failed": 0}
 
+    # Imported rows are tagged with source=csv (provenance), not manual.
+    from app.models import TxnSource
+
+    sources = {
+        t.source
+        for t in session.scalars(
+            __import__("sqlalchemy").select(Transaction)
+        )
+    }
+    assert sources == {TxnSource.csv}
+
     # A second preview now flags both rows as duplicates (hashes exist).
     preview2 = client.post(
         "/api/import/preview",

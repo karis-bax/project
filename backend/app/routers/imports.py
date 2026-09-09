@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from .. import importer, schemas
 from ..deps import get_db
-from ..models import Account, CategoryRule, Transaction
+from ..models import Account, CategoryRule, Transaction, TxnSource
 from ..rules_engine import Rule, propose_category, sort_rules
 
 router = APIRouter(prefix="/api/import", tags=["import"])
@@ -235,6 +235,7 @@ def commit_import(
                 amount_cents=row.amount_cents,
                 memo=row.memo,
                 cleared=False,
+                source=TxnSource.csv,
                 import_hash=import_hash,
             )
         )
