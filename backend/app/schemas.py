@@ -10,11 +10,83 @@ from __future__ import annotations
 import datetime as dt
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 from .models import AccountKind, GoalKind, RuleField
 
 MONTH_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
+
+
+class RequestModel(BaseModel):
+    """Base for request bodies. Unknown fields are a 422, not a shrug.
+
+    ``extra="forbid"`` means a body carrying ``user_id`` is REJECTED rather
+    than silently ignored — ownership comes from the authenticated session, and
+    a client that thinks it can set it should be told otherwise, loudly.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_server_owned_fields(cls, data: object) -> object:
+        if isinstance(data, dict):
+            offending = {"user_id", "owner_id", "tenant_id"} & data.keys()
+            if offending:
+                raise ValueError(
+                    f"{sorted(offending)} is set by the server from the "
+                    "authenticated session and may not be supplied."
+                )
+        return data
+
+
+# --- Auth --------------------------------------------------------------------
+
+
+class RegisterRequest(RequestModel):
+    email: EmailStr
+    # Bounded: argon2 has no bcrypt-style truncation, so an unbounded password
+    # is a memory-hard hashing DoS. 422 here costs nothing; hashing 10MB does.
+    password: str = Field(min_length=12, max_length=128)
+
+
+class LoginRequest(RequestModel):
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=128)
+
+
+class RefreshRequest(RequestModel):
+    refresh_token: str = Field(min_length=1, max_length=512)
+
+
+class LogoutRequest(RequestModel):
+    refresh_token: str | None = Field(default=None, max_length=512)
+
+
+class UserRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    email: str
+    is_active: bool
+    created_at: dt.datetime
+
+
+class RegisterResponse(BaseModel):
+    # Registration deliberately does NOT return tokens: it is not a login, and
+    # a differing response shape stops clients conflating the two.
+    user: UserRead
+
+
+class TokenPairResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int
+
+
+class LogoutResponse(BaseModel):
+    revoked: bool
 
 
 class ORMModel(BaseModel):
@@ -31,7 +103,7 @@ class TimestampsMixin(BaseModel):
 # --- Account ---------------------------------------------------------------
 
 
-class AccountBase(BaseModel):
+class AccountBase(RequestModel):
     name: str
     kind: AccountKind
     opening_balance_cents: int = 0
@@ -42,7 +114,7 @@ class AccountCreate(AccountBase):
     pass
 
 
-class AccountUpdate(BaseModel):
+class AccountUpdate(RequestModel):
     name: str | None = None
     kind: AccountKind | None = None
     opening_balance_cents: int | None = None
@@ -56,7 +128,7 @@ class AccountRead(ORMModel, TimestampsMixin, AccountBase):
 # --- CategoryGroup ---------------------------------------------------------
 
 
-class CategoryGroupBase(BaseModel):
+class CategoryGroupBase(RequestModel):
     name: str
     sort_order: int = 0
 
@@ -72,7 +144,7 @@ class CategoryGroupRead(ORMModel, TimestampsMixin, CategoryGroupBase):
 # --- Category --------------------------------------------------------------
 
 
-class CategoryBase(BaseModel):
+class CategoryBase(RequestModel):
     group_id: int
     name: str
     sort_order: int = 0
@@ -83,6 +155,20 @@ class CategoryCreate(CategoryBase):
     pass
 
 
+class CategoryUpdate(RequestModel):
+    """PATCH body: every field optional.
+
+    This route previously typed its body as ``CategoryCreate | CategoryBase``,
+    two models with identical required fields — so a PATCH could not omit
+    group_id or name and a partial update was impossible.
+    """
+
+    group_id: int | None = None
+    name: str | None = None
+    sort_order: int | None = None
+    archived: bool | None = None
+
+
 class CategoryRead(ORMModel, TimestampsMixin, CategoryBase):
     id: int
 
@@ -90,7 +176,7 @@ class CategoryRead(ORMModel, TimestampsMixin, CategoryBase):
 # --- Transaction -----------------------------------------------------------
 
 
-class TransactionBase(BaseModel):
+class TransactionBase(RequestModel):
     account_id: int
     # None means uncategorized; positive uncategorized amounts are income.
     category_id: int | None = None
@@ -107,7 +193,7 @@ class TransactionCreate(TransactionBase):
     pass
 
 
-class TransactionUpdate(BaseModel):
+class TransactionUpdate(RequestModel):
     account_id: int | None = None
     category_id: int | None = None
     date: dt.date | None = None
@@ -125,7 +211,7 @@ class TransactionRead(ORMModel, TimestampsMixin, TransactionBase):
 # --- Allocation ------------------------------------------------------------
 
 
-class AllocationBase(BaseModel):
+class AllocationBase(RequestModel):
     month: str = Field(pattern=MONTH_PATTERN)
     category_id: int
     amount_cents: int
@@ -142,7 +228,7 @@ class AllocationRead(ORMModel, TimestampsMixin, AllocationBase):
 # --- CategoryRule ----------------------------------------------------------
 
 
-class CategoryRuleBase(BaseModel):
+class CategoryRuleBase(RequestModel):
     match_field: RuleField
     pattern: str
     category_id: int
@@ -160,7 +246,7 @@ class CategoryRuleRead(ORMModel, TimestampsMixin, CategoryRuleBase):
 # --- Goal ------------------------------------------------------------------
 
 
-class GoalBase(BaseModel):
+class GoalBase(RequestModel):
     category_id: int
     kind: GoalKind
     target_cents: int
@@ -208,7 +294,7 @@ class PayeeSuggestion(BaseModel):
     count: int
 
 
-class BulkCategorizeRequest(BaseModel):
+class BulkCategorizeRequest(RequestModel):
     ids: list[int]
     category_id: int | None = None
 
@@ -222,11 +308,11 @@ class DeletedResponse(BaseModel):
     deleted: bool
 
 
-class GroupReorderRequest(BaseModel):
+class GroupReorderRequest(RequestModel):
     group_ids: list[int]
 
 
-class AllocationUpsertRequest(BaseModel):
+class AllocationUpsertRequest(RequestModel):
     amount_cents: int
 
 
@@ -272,7 +358,7 @@ class MonthBudget(ORMModel):
 # --- CSV import ------------------------------------------------------------
 
 
-class ImportMapping(BaseModel):
+class ImportMapping(RequestModel):
     amount_shape: Literal["signed", "debit_credit", "amount_type"] = "signed"
     date_col: int | None = None
     payee_col: int | None = None
@@ -308,12 +394,12 @@ class ImportPreviewResponse(BaseModel):
     warnings: list[str] = []
 
 
-class ImportRemapRequest(BaseModel):
+class ImportRemapRequest(RequestModel):
     token: str
     mapping: ImportMapping
 
 
-class ImportCommitRow(BaseModel):
+class ImportCommitRow(RequestModel):
     date: str
     payee: str
     amount_cents: int
@@ -322,7 +408,7 @@ class ImportCommitRow(BaseModel):
     is_duplicate: bool = False
 
 
-class ImportCommitRequest(BaseModel):
+class ImportCommitRequest(RequestModel):
     token: str
     rows: list[ImportCommitRow]
     skip_duplicates: bool = True
@@ -337,7 +423,7 @@ class ImportCommitResponse(BaseModel):
 # --- Rules -----------------------------------------------------------------
 
 
-class RuleReorderRequest(BaseModel):
+class RuleReorderRequest(RequestModel):
     rule_ids: list[int]
 
 
@@ -348,7 +434,7 @@ class RuleApplyResponse(BaseModel):
 # --- Bank sync -------------------------------------------------------------
 
 
-class SyncClaimRequest(BaseModel):
+class SyncClaimRequest(RequestModel):
     setup_token: str
 
 
@@ -367,18 +453,18 @@ class SyncAccountStatus(BaseModel):
     mismatch: bool = False
 
 
-class SyncCreateAccount(BaseModel):
+class SyncCreateAccount(RequestModel):
     name: str
     kind: AccountKind
 
 
-class SyncLinkRequest(BaseModel):
+class SyncLinkRequest(RequestModel):
     external_id: str
     account_id: int | None = None
     create_as: SyncCreateAccount | None = None
 
 
-class SyncRunRequest(BaseModel):
+class SyncRunRequest(RequestModel):
     days: int = 30
 
 

@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import schemas
-from ..deps import get_db, validate_month
+from ..deps import get_db, get_live_or_404, validate_month
 from ..models import Category, CategoryRule, Transaction
 from ..rules_engine import Rule, propose_category, sort_rules
 
@@ -15,13 +15,7 @@ router = APIRouter(prefix="/api/rules", tags=["rules"])
 
 
 def _category_or_404(db: Session, category_id: int) -> Category:
-    category = db.get(Category, category_id)
-    if category is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Category {category_id} not found.",
-        )
-    return category
+    return get_live_or_404(db, Category, category_id, label="Category")
 
 
 @router.get("", response_model=list[schemas.CategoryRuleRead])
@@ -77,12 +71,7 @@ def reorder_rules(
 def delete_rule(
     rule_id: int, db: Session = Depends(get_db)
 ) -> schemas.DeletedResponse:
-    rule = db.get(CategoryRule, rule_id)
-    if rule is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Rule {rule_id} not found.",
-        )
+    rule = get_live_or_404(db, CategoryRule, rule_id, label="Rule")
     db.delete(rule)
     db.commit()
     return schemas.DeletedResponse(id=rule_id, deleted=True)

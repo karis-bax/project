@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sqlalchemy import delete, select  # noqa: E402
 
-from app.db import SessionLocal  # noqa: E402
+from app.db import unscoped_session  # noqa: E402
 from app.models import Transaction  # noqa: E402
 
 RETAIN_DAYS = 90
@@ -23,8 +23,10 @@ RETAIN_DAYS = 90
 
 def main() -> int:
     cutoff = datetime.now() - timedelta(days=RETAIN_DAYS)
-    db = SessionLocal()
-    try:
+    with unscoped_session(
+        reason="purge is cross-user maintenance: it hard-deletes expired rows "
+        "for every user"
+    ) as db:
         doomed = list(
             db.scalars(
                 select(Transaction)
@@ -48,8 +50,6 @@ def main() -> int:
             db.commit()
         print(f"Purged {len(doomed)} transaction(s) soft-deleted before {cutoff.date()}.")
         return 0
-    finally:
-        db.close()
 
 
 if __name__ == "__main__":

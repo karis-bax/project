@@ -13,7 +13,7 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.db import Base, get_db
+from app.db import Base
 from app.importer import compute_import_hash
 from app.insights import current_month
 from app.main import app
@@ -26,6 +26,7 @@ from app.models import (
     TxnSource,
 )
 from app.sync import engine as sync_engine
+from tests.routes import api_get_paths
 from app.sync.base import NormalizedAccount, NormalizedTxn
 
 
@@ -167,26 +168,37 @@ _NON_TXN = {
     "/api/goals",
     "/api/rules",
     "/api/sync/runs",
+    # Auth routes: no transaction data.
+    "/api/auth/me",
 }
 
 
-def _api_get_paths() -> set[str]:
-    paths: set[str] = set()
-    for route in app.routes:
-        methods = getattr(route, "methods", None) or set()
-        path = getattr(route, "path", "")
-        if "GET" in methods and path.startswith("/api/"):
-            paths.add(path)
-    return paths
-
-
 def test_every_transaction_reading_route_is_covered() -> None:
+    """Fail when a GET route is added without classifying it.
+
+    Enumeration comes from tests/routes.py. It used to walk ``app.routes``
+    inline, which under FastAPI 0.141 yields _IncludedRouter wrappers rather
+    than APIRoutes — so it discovered ZERO routes and this guard passed
+    vacuously for every route in the app.
+
+    Compared in BOTH directions: a stale entry for a deleted route is as much a
+    bug as a new unclassified one, and only the two-way check catches it.
+    """
+
     classified = _COVERED | _NON_TXN
-    unclassified = _api_get_paths() - classified
+    live = api_get_paths()
+
+    unclassified = live - classified
     assert not unclassified, (
         "New GET /api route(s) not classified for soft-delete coverage: "
         f"{sorted(unclassified)}. Add each to _COVERED (and exercise it in the "
         "vanish test) or to _NON_TXN."
+    )
+
+    stale = classified - live
+    assert not stale, (
+        f"Classified route(s) that no longer exist: {sorted(stale)}. "
+        "Remove them from _COVERED / _NON_TXN."
     )
 
 
@@ -265,7 +277,7 @@ def test_csv_reimport_revives_soft_deleted_row(
     assert revived is not None and revived.deleted_at is None
 
 
-def test_resync_revives_soft_deleted_row(session: Session) -> None:
+def test_resync_revives_soft_deleted_row(session: Session, default_user) -> None:
     account = Account(
         name="Checking",
         kind=AccountKind.checking,
@@ -296,7 +308,7 @@ def test_resync_revives_soft_deleted_row(session: Session) -> None:
             ],
         )
     ]
-    sync_engine.apply(session, payload)
+    sync_engine.apply(session, payload, default_user.id)
     session.commit()
     txn = session.scalar(select(Transaction))
     txn_id = txn.id
@@ -306,7 +318,7 @@ def test_resync_revives_soft_deleted_row(session: Session) -> None:
     session.commit()
     assert session.scalar(select(func.count()).select_from(Transaction)) == 0
 
-    result = sync_engine.apply(session, payload)
+    result = sync_engine.apply(session, payload, default_user.id)
     session.commit()
     assert result.added == 0  # revived via id match, not inserted
     total = session.scalar(

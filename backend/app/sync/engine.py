@@ -109,6 +109,7 @@ def _find_pending_match(
 def apply(
     db: Session,
     accounts: list[NormalizedAccount],
+    user_id: int,
     now: datetime | None = None,
 ) -> ApplyResult:
     now = now or datetime.now()
@@ -117,8 +118,13 @@ def apply(
     result = ApplyResult()
 
     for na in accounts:
+        # user_id is explicit here even though the session filter already
+        # applies it: this is the one line where a sync run could write into
+        # somebody else's account, and it should be impossible to read the
+        # query and wonder.
         local = db.scalar(
             select(Account).where(
+                Account.user_id == user_id,
                 Account.sync_source == "simplefin",
                 Account.external_id == na.external_id,
             )

@@ -12,7 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import importer, schemas
-from ..deps import get_db
+from ..deps import get_current_user, get_db, get_live_or_404
+from ..models import User
 from ..models import Account, CategoryRule, Transaction, TxnSource
 from ..rules_engine import Rule, propose_category, sort_rules
 
@@ -21,6 +22,7 @@ router = APIRouter(prefix="/api/import", tags=["import"])
 
 @dataclass
 class StagedBatch:
+    user_id: int
     account_id: int
     header: list[str] | None
     data_rows: list[list[str]]
@@ -29,8 +31,12 @@ class StagedBatch:
     created_at: float
 
 
-# In-memory staging store keyed by opaque token. Fine for a single-process app;
-# nothing here is written to the database until /commit.
+# In-memory staging store keyed by an opaque token. Fine for a single-process
+# app; nothing here is written to the database until /commit.
+#
+# The token is a capability: whoever holds it can write into the batch's
+# account. It therefore carries an owner, and redemption checks it — a token
+# has no primary key, so no amount of row-level scoping covers this.
 _STAGED: dict[str, StagedBatch] = {}
 _STAGE_TTL_SECONDS = 60 * 60
 
@@ -76,6 +82,24 @@ def _soft_deleted_by_hash(db: Session) -> dict[str, Transaction]:
         .execution_options(include_deleted=True)
     )
     return {t.import_hash: t for t in rows if t.import_hash}
+
+
+def _batch_or_404(token: str, user_id: int) -> StagedBatch:
+    """Resolve a staging token for its owner, or 404.
+
+    Wrong-owner, unknown and expired all take this single code path and return
+    the identical body, so the response cannot be used to probe whether someone
+    else's token exists. There is deliberately no branch that could produce a
+    403.
+    """
+
+    batch = _STAGED.get(token)
+    if batch is None or batch.user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Unknown or expired import token; re-upload the file.",
+        )
+    return batch
 
 
 def _columns(batch: StagedBatch) -> list[str]:
@@ -145,12 +169,11 @@ async def preview_import(
     account_id: int = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> schemas.ImportPreviewResponse:
-    if db.get(Account, account_id) is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Account {account_id} not found.",
-        )
+    # 404 (not 403) when the account belongs to someone else: the id must not
+    # be confirmable.
+    get_live_or_404(db, Account, account_id, label="Account")
 
     raw = await file.read()
     try:
@@ -172,6 +195,7 @@ async def preview_import(
     _prune()
     token = secrets.token_urlsafe(16)
     batch = StagedBatch(
+        user_id=user.id,
         account_id=account_id,
         header=header,
         data_rows=data_rows,
@@ -187,28 +211,22 @@ async def preview_import(
 
 @router.post("/remap", response_model=schemas.ImportPreviewResponse)
 def remap_import(
-    payload: schemas.ImportRemapRequest, db: Session = Depends(get_db)
+    payload: schemas.ImportRemapRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> schemas.ImportPreviewResponse:
-    batch = _STAGED.get(payload.token)
-    if batch is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Unknown or expired import token; re-upload the file.",
-        )
+    batch = _batch_or_404(payload.token, user.id)
     mapping = importer.Mapping(**payload.mapping.model_dump())
     return _response(payload.token, batch, mapping, db)
 
 
 @router.post("/commit", response_model=schemas.ImportCommitResponse)
 def commit_import(
-    payload: schemas.ImportCommitRequest, db: Session = Depends(get_db)
+    payload: schemas.ImportCommitRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> schemas.ImportCommitResponse:
-    batch = _STAGED.get(payload.token)
-    if batch is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Unknown or expired import token; re-upload the file.",
-        )
+    batch = _batch_or_404(payload.token, user.id)
     account_id = batch.account_id
 
     existing = _existing_hashes(db)

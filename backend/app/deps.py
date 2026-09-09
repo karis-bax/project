@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from typing import TypeVar
 
-from fastapi import HTTPException, Path, status
+from fastapi import Depends, HTTPException, Path, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .db import Base, get_db  # get_db re-exported for routers
+from .auth.dependencies import get_current_user
+from .db import TENANT, Base, SessionLocal
+from .models import User
 
 __all__ = [
     "get_db",
+    "get_current_user",
     "get_live_or_404",
     "MONTH_RE",
     "validate_month",
@@ -20,6 +24,26 @@ __all__ = [
 ]
 
 _Model = TypeVar("_Model", bound=Base)
+
+
+def get_db(
+    current_user: User = Depends(get_current_user),
+) -> Iterator[Session]:
+    """A request-scoped Session, pinned to the authenticated user.
+
+    ``get_db`` depends on authentication deliberately: there is then no way to
+    obtain a request Session without a user, and therefore no way to forget to
+    scope one. A route added next month writes the only thing anyone writes —
+    ``db: Session = Depends(get_db)`` — and is authenticated *and* tenant-scoped
+    by construction.
+    """
+
+    db = SessionLocal()
+    db.info[TENANT] = current_user.id
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 def get_live_or_404(

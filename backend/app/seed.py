@@ -19,7 +19,7 @@ from datetime import date, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .db import SessionLocal
+from .db import unscoped_session, user_session
 from .models import (
     Account,
     AccountKind,
@@ -334,12 +334,25 @@ def row_counts(db: Session) -> dict[str, int]:
 
 
 def main() -> None:
-    db = SessionLocal()
-    try:
+    # Seed rows must belong to a user. Resolve one first with an unscoped
+    # session, then do the actual seeding inside that user's scope so the
+    # before_flush stamper fills user_id automatically.
+    from sqlalchemy import select
+
+    from .models import User
+
+    with unscoped_session(reason="seeding must find a user before it has a scope") as lookup:
+        user = lookup.scalar(select(User).order_by(User.id))
+        if user is None:
+            raise SystemExit(
+                "No user exists to own seed data. Run `just migrate` with "
+                "BOOTSTRAP_EMAIL set, then scripts/set_password.py."
+            )
+        user_id = user.id
+
+    with user_session(user_id) as db:
         result = run_seed(db)
         counts = row_counts(db)
-    finally:
-        db.close()
 
     print(
         f"Seed complete: {result['transactions_created']} transaction(s) created, "

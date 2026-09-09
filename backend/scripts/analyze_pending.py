@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sqlalchemy import select
 
-from app.db import SessionLocal
+from app.db import unscoped_session
 from app.importer import normalize_payee
 from app.models import Account, Transaction, TxnSource
 from app.sync.engine import (
@@ -57,7 +57,13 @@ def _rule() -> None:
 
 
 def main() -> None:
-    db = SessionLocal()
+    with unscoped_session(
+        reason="read-only pending analysis reports across every user"
+    ) as db:
+        _report(db)
+
+
+def _report(db) -> None:
     today = date.today()
 
     pending = list(

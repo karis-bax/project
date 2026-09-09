@@ -10,30 +10,18 @@ from sqlalchemy.orm import Session
 
 from .. import budget as budget_engine
 from .. import schemas
-from ..deps import get_db
+from ..deps import get_db, get_live_or_404
 from ..models import Allocation, Category, CategoryGroup
 
 router = APIRouter(prefix="/api", tags=["categories"])
 
 
 def _group_or_404(db: Session, group_id: int) -> CategoryGroup:
-    group = db.get(CategoryGroup, group_id)
-    if group is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Category group {group_id} not found.",
-        )
-    return group
+    return get_live_or_404(db, CategoryGroup, group_id, label="Category group")
 
 
 def _category_or_404(db: Session, category_id: int) -> Category:
-    category = db.get(Category, category_id)
-    if category is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Category {category_id} not found.",
-        )
-    return category
+    return get_live_or_404(db, Category, category_id, label="Category")
 
 
 @router.get("/categories", response_model=list[schemas.CategoryGroupWithCategories])
@@ -89,7 +77,7 @@ def create_category(
 @router.patch("/categories/{category_id}", response_model=schemas.CategoryRead)
 def update_category(
     category_id: int,
-    payload: schemas.CategoryCreate | schemas.CategoryBase,
+    payload: schemas.CategoryUpdate,
     db: Session = Depends(get_db),
 ) -> Category:
     category = _category_or_404(db, category_id)
@@ -152,12 +140,17 @@ def delete_category(
         _category_or_404(db, absorb_to)
 
     # 1. Return the archive-month and future allocations (past ones stay).
-    db.execute(
-        delete(Allocation).where(
+    # Loaded and deleted through the ORM rather than a bulk DELETE: the
+    # session-level filters apply either way, but this keeps the row count
+    # honest and stays clear of the bulk-DML ban (see
+    # tests/test_tenant_isolation.py).
+    for allocation in db.scalars(
+        select(Allocation).where(
             Allocation.category_id == category_id,
             Allocation.month >= archive_month,
         )
-    )
+    ):
+        db.delete(allocation)
 
     # 2. Move the residual into the target's current month, if absorbing.
     if absorb_to is not None and residual != 0:

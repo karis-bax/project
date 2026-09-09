@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -32,15 +33,23 @@ class Discovered:
     balance_date: date | None
 
 
-# Cached view of the most recently discovered external accounts (single user,
-# process lifetime). Refreshed on claim and on every run. Holds reported
-# balances so reconciliation does not require a live call on every page load.
-_DISCOVERED: dict[str, Discovered] = {}
+# Cached view of the most recently discovered external accounts, PER USER.
+# Refreshed on claim and on every run; holds reported balances so reconciliation
+# does not require a live call on every page load.
+#
+# Was a single flat dict, which meant one user's bank names, org names and
+# balances were served to every user from GET /api/sync/accounts.
+#
+# Still process-local: with more than one uvicorn worker, a claim on worker A
+# is invisible to a request served by worker B. Run a single worker until this
+# becomes a table.
+_DISCOVERED: dict[int, dict[str, Discovered]] = {}
 
 
-def cache_accounts(accounts: list[NormalizedAccount]) -> None:
+def cache_accounts(user_id: int, accounts: list[NormalizedAccount]) -> None:
+    per_user = _DISCOVERED.setdefault(user_id, {})
     for a in accounts:
-        _DISCOVERED[a.external_id] = Discovered(
+        per_user[a.external_id] = Discovered(
             external_id=a.external_id,
             name=a.name,
             org_name=a.org_name,
@@ -50,18 +59,25 @@ def cache_accounts(accounts: list[NormalizedAccount]) -> None:
         )
 
 
-def discovered() -> dict[str, Discovered]:
-    return dict(_DISCOVERED)
+def discovered(user_id: int) -> dict[str, Discovered]:
+    return dict(_DISCOVERED.get(user_id, {}))
 
 
-def build_provider() -> SimpleFINProvider | None:
-    url = credentials.get_access_url()
+def clear_discovered(user_id: int) -> None:
+    _DISCOVERED.pop(user_id, None)
+
+
+def build_provider(user_id: int) -> SimpleFINProvider | None:
+    """The provider for one user's credential, or None if they have none."""
+
+    url = credentials.get_access_url(user_id)
     return SimpleFINProvider(url) if url else None
 
 
 def run_sync(
     db: Session,
     provider: SyncProvider,
+    user_id: int,
     days: int = 30,
     now: datetime | None = None,
 ) -> SyncRun:
@@ -106,8 +122,8 @@ def run_sync(
     try:
         accounts = provider.fetch(since, until)
         errlist = list(getattr(provider, "errlist", []) or [])
-        result = engine.apply(db, accounts, now=now)
-        cache_accounts(accounts)
+        result = engine.apply(db, accounts, user_id, now=now)
+        cache_accounts(user_id, accounts)
         run.status = SyncStatus.partial if errlist else SyncStatus.ok
         run.accounts_synced = result.accounts_synced
         run.added = result.added
@@ -119,7 +135,7 @@ def run_sync(
     except Exception as exc:  # noqa: BLE001 - always record a failed run
         db.rollback()
         # The running row was committed (lock); flip it to failed to release it.
-        run = db.get(SyncRun, run_id)
+        run = db.scalar(select(SyncRun).where(SyncRun.id == run_id))
         run.status = SyncStatus.failed
         run.finished_at = datetime.now()
         run.errors = [{"message": credentials.redact(exc)}]

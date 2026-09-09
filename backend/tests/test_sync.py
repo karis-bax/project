@@ -97,14 +97,14 @@ def _accounts_from_fixture() -> list[NormalizedAccount]:
 # --- upsert idempotence ----------------------------------------------------
 
 
-def test_resync_identical_payload_adds_zero(db: Session) -> None:
+def test_resync_identical_payload_adds_zero(db: Session, default_user) -> None:
     make_synced_account(db)
-    first = engine.apply(db, _accounts_from_fixture())
+    first = engine.apply(db, _accounts_from_fixture(), default_user.id)
     db.commit()
     assert first.added == 2
     assert first.updated == 0
 
-    second = engine.apply(db, _accounts_from_fixture())
+    second = engine.apply(db, _accounts_from_fixture(), default_user.id)
     db.commit()
     assert second.added == 0
     assert second.updated == 2  # same rows, updated in place — not duplicated
@@ -118,6 +118,7 @@ def test_resync_identical_payload_adds_zero(db: Session) -> None:
 
 def test_pending_posting_with_changed_id_updates_one_row_keeps_category(
     db: Session,
+    default_user,
 ) -> None:
     account = make_synced_account(db)
     today = date.today()
@@ -140,7 +141,7 @@ def test_pending_posting_with_changed_id_updates_one_row_keeps_category(
             )
         ],
     )
-    engine.apply(db, [pending])
+    engine.apply(db, [pending], default_user.id)
     db.commit()
 
     # User assigns a category to that pending row.
@@ -175,7 +176,7 @@ def test_pending_posting_with_changed_id_updates_one_row_keeps_category(
             )
         ],
     )
-    result = engine.apply(db, [posted])
+    result = engine.apply(db, [posted], default_user.id)
     db.commit()
 
     assert result.added == 0  # no duplicate created
@@ -195,7 +196,7 @@ def test_pending_posting_with_changed_id_updates_one_row_keeps_category(
 # --- stale pending cleanup -------------------------------------------------
 
 
-def test_stale_pending_removed_after_14_days(db: Session) -> None:
+def test_stale_pending_removed_after_14_days(db: Session, default_user) -> None:
     account = make_synced_account(db)
     stale = Transaction(
         account_id=account.id,
@@ -221,7 +222,7 @@ def test_stale_pending_removed_after_14_days(db: Session) -> None:
         balance_date=date.today(),
         transactions=[],
     )
-    result = engine.apply(db, [empty])
+    result = engine.apply(db, [empty], default_user.id)
     db.commit()
 
     assert result.deleted == 1
@@ -231,20 +232,20 @@ def test_stale_pending_removed_after_14_days(db: Session) -> None:
 # --- errlist surfaces, does not raise --------------------------------------
 
 
-def test_errlist_surfaces_to_caller(db: Session) -> None:
+def test_errlist_surfaces_to_caller(db: Session, default_user) -> None:
     make_synced_account(db)
     provider = FakeProvider(
         _accounts_from_fixture(),
         errlist=["Connection to Test Bank needs re-authentication."],
     )
-    run = service.run_sync(db, provider)
+    run = service.run_sync(db, provider, default_user.id)
     assert run.status.value == "partial"
     assert run.errors == ["Connection to Test Bank needs re-authentication."]
     assert run.added == 2
 
 
-def test_fetch_failure_records_failed_run_without_raising(db: Session) -> None:
-    run = service.run_sync(db, RaisingProvider())
+def test_fetch_failure_records_failed_run_without_raising(db: Session, default_user) -> None:
+    run = service.run_sync(db, RaisingProvider(), default_user.id)
     assert run.status.value == "failed"
     assert run.errors  # message present
 
@@ -252,7 +253,7 @@ def test_fetch_failure_records_failed_run_without_raising(db: Session) -> None:
 # --- reconciliation (bank vs ledger) ---------------------------------------
 
 
-def test_reconciliation_reported_vs_computed(db: Session, monkeypatch) -> None:
+def test_reconciliation_reported_vs_computed(db: Session, monkeypatch, default_user) -> None:
     from app.routers import sync as sync_router
 
     account = make_synced_account(db)
@@ -271,28 +272,32 @@ def test_reconciliation_reported_vs_computed(db: Session, monkeypatch) -> None:
     db.commit()
 
     # Bank reports the same balance -> reconciled (no mismatch).
+    # _DISCOVERED is now keyed by user id first: one user's bank names and
+    # balances must not be visible to another.
     monkeypatch.setattr(
         service,
         "_DISCOVERED",
         {
-            "ACT-1": service.Discovered(
-                external_id="ACT-1",
-                name="Checking",
-                org_name="Test Bank",
-                currency="USD",
-                balance_cents=-5230,
-                balance_date=date.today(),
-            )
+            default_user.id: {
+                "ACT-1": service.Discovered(
+                    external_id="ACT-1",
+                    name="Checking",
+                    org_name="Test Bank",
+                    currency="USD",
+                    balance_cents=-5230,
+                    balance_date=date.today(),
+                )
+            }
         },
     )
-    [row] = sync_router._statuses(db)
+    [row] = sync_router._statuses(db, default_user.id)
     assert row.reported_balance_cents == -5230
     assert row.computed_balance_cents == -5230
     assert row.mismatch is False
 
     # Bank reports a different balance -> mismatch flagged.
-    service._DISCOVERED["ACT-1"].balance_cents = -9999
-    [row2] = sync_router._statuses(db)
+    service._DISCOVERED[default_user.id]["ACT-1"].balance_cents = -9999
+    [row2] = sync_router._statuses(db, default_user.id)
     assert row2.mismatch is True
 
 
@@ -361,16 +366,18 @@ def _one_account(txns: list[NormalizedTxn]) -> list[NormalizedAccount]:
 # --- F2: posted dedup by count matching ------------------------------------
 
 
-def test_posted_reissued_id_does_not_duplicate(db: Session) -> None:
+def test_posted_reissued_id_does_not_duplicate(db: Session, default_user) -> None:
     make_synced_account(db)
     today = date.today()
 
-    engine.apply(db, _one_account([_posted("OLD", today, -500, "COFFEE SHOP")]))
+    engine.apply(db, _one_account([_posted("OLD", today, -500, "COFFEE SHOP")]), default_user.id)
     db.commit()
     assert _txn_count(db) == 1
 
     # Same content, DIFFERENT external_id (a reissued id).
-    result = engine.apply(db, _one_account([_posted("NEW", today, -500, "COFFEE SHOP")]))
+    result = engine.apply(
+        db, _one_account([_posted("NEW", today, -500, "COFFEE SHOP")]), default_user.id
+    )
     db.commit()
     assert result.added == 0
     rows = list(db.scalars(__import__("sqlalchemy").select(Transaction)))
@@ -378,28 +385,28 @@ def test_posted_reissued_id_does_not_duplicate(db: Session) -> None:
     assert rows[0].external_id == "NEW"  # existing row adopted the new id
 
 
-def test_two_identical_charges_both_survive(db: Session) -> None:
+def test_two_identical_charges_both_survive(db: Session, default_user) -> None:
     make_synced_account(db)
     today = date.today()
     payload = _one_account(
         [_posted("C1", today, -500, "COFFEE SHOP"), _posted("C2", today, -500, "COFFEE SHOP")]
     )
 
-    first = engine.apply(db, payload)
+    first = engine.apply(db, payload, default_user.id)
     db.commit()
     assert first.added == 2
     assert _txn_count(db) == 2  # two genuine identical charges both survive
 
-    second = engine.apply(db, payload)
+    second = engine.apply(db, payload, default_user.id)
     db.commit()
     assert second.added == 0
     assert _txn_count(db) == 2  # resync leaves exactly two, not four or one
 
 
-def test_count_matching_inserts_only_the_difference(db: Session) -> None:
+def test_count_matching_inserts_only_the_difference(db: Session, default_user) -> None:
     make_synced_account(db)
     today = date.today()
-    engine.apply(db, _one_account([_posted("OLD", today, -500, "COFFEE SHOP")]))
+    engine.apply(db, _one_account([_posted("OLD", today, -500, "COFFEE SHOP")]), default_user.id)
     db.commit()
 
     # Payload has 3 of the key with fresh ids; DB has 1 -> insert exactly 2.
@@ -412,6 +419,7 @@ def test_count_matching_inserts_only_the_difference(db: Session) -> None:
                 _posted("N3", today, -500, "COFFEE SHOP"),
             ]
         ),
+        default_user.id,
     )
     db.commit()
     assert result.added == 2
@@ -421,9 +429,9 @@ def test_count_matching_inserts_only_the_difference(db: Session) -> None:
 # --- F3: run lock + guarded commit -----------------------------------------
 
 
-def test_run_records_ok_and_releases_lock(db: Session) -> None:
+def test_run_records_ok_and_releases_lock(db: Session, default_user) -> None:
     make_synced_account(db)
-    run = service.run_sync(db, FakeProvider(_accounts_from_fixture()))
+    run = service.run_sync(db, FakeProvider(_accounts_from_fixture()), default_user.id)
     assert run.status.value == "ok"
     running = db.scalar(
         __import__("sqlalchemy").select(__import__("sqlalchemy").func.count())
@@ -433,7 +441,7 @@ def test_run_records_ok_and_releases_lock(db: Session) -> None:
     assert running == 0  # lock released
 
 
-def test_concurrent_run_is_locked_and_both_recorded(db: Session) -> None:
+def test_concurrent_run_is_locked_and_both_recorded(db: Session, default_user) -> None:
     make_synced_account(db)
     # Simulate an in-flight run holding the lock.
     inflight = SyncRun(status=SyncStatus.running, started_at=datetime.now(), errors=[])
@@ -441,7 +449,7 @@ def test_concurrent_run_is_locked_and_both_recorded(db: Session) -> None:
     db.commit()
 
     with pytest.raises(service.SyncInProgress):
-        service.run_sync(db, FakeProvider(_accounts_from_fixture()))
+        service.run_sync(db, FakeProvider(_accounts_from_fixture()), default_user.id)
 
     runs = list(db.scalars(__import__("sqlalchemy").select(SyncRun)))
     statuses = {r.status.value for r in runs}
@@ -452,7 +460,7 @@ def test_concurrent_run_is_locked_and_both_recorded(db: Session) -> None:
 # --- F9: constant query count on sync accounts -----------------------------
 
 
-def test_statuses_query_count_is_constant(db: Session) -> None:
+def test_statuses_query_count_is_constant(db: Session, default_user) -> None:
     from sqlalchemy import event
 
     from app.routers import sync as sync_router
@@ -474,7 +482,7 @@ def test_statuses_query_count_is_constant(db: Session) -> None:
     event.listen(engine_bind, "before_cursor_execute", _on_exec)
     try:
         count["n"] = 0
-        sync_router._statuses(db)
+        sync_router._statuses(db, default_user.id)
         one_account = count["n"]
 
         db.add_all(
@@ -492,7 +500,7 @@ def test_statuses_query_count_is_constant(db: Session) -> None:
         db.commit()
 
         count["n"] = 0
-        sync_router._statuses(db)
+        sync_router._statuses(db, default_user.id)
         three_accounts = count["n"]
     finally:
         event.remove(engine_bind, "before_cursor_execute", _on_exec)

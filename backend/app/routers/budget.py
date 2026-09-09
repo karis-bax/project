@@ -9,20 +9,15 @@ from sqlalchemy.orm import Session
 
 from .. import budget as budget_engine
 from .. import schemas
-from ..deps import get_db, month_path
+from ..db import tenant_id
+from ..deps import get_db, get_live_or_404, month_path
 from ..models import Allocation, Category
 
 router = APIRouter(prefix="/api/budget", tags=["budget"])
 
 
 def _category_or_404(db: Session, category_id: int) -> Category:
-    category = db.get(Category, category_id)
-    if category is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Category {category_id} not found.",
-        )
-    return category
+    return get_live_or_404(db, Category, category_id, label="Category")
 
 
 @router.get("/{month}", response_model=schemas.MonthBudget)
@@ -45,7 +40,12 @@ def upsert_allocation(
     # Atomic upsert: a non-atomic select-then-insert races when two writes for
     # the same not-yet-existing (month, category) arrive together (e.g. rapid
     # keyboard assigning), both insert, and one hits the UNIQUE constraint.
+    # A Core INSERT: do_orm_execute cannot inject values into it and the
+    # before_flush stamper never sees it, so user_id is supplied explicitly
+    # from the session — never from the request body. user_id NOT NULL is the
+    # backstop if this is ever forgotten.
     stmt = sqlite_insert(Allocation).values(
+        user_id=tenant_id(db),
         month=month,
         category_id=category_id,
         amount_cents=payload.amount_cents,
