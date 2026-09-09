@@ -43,3 +43,7 @@ pnpm-debug.log*
 
 # --- Frontend build info ---
 *.tsbuildinfo
+
+# Expo
+mobile/.expo/
+mobile/dist/
