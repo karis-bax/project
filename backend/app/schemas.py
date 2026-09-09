@@ -8,6 +8,7 @@ happens only in the React UI. Dates are ISO ``YYYY-MM-DD``; budget months are
 from __future__ import annotations
 
 import datetime as dt
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -262,3 +263,79 @@ class MonthBudget(ORMModel):
     activity_cents: int
     available_cents: int
     left_to_assign_cents: int
+
+
+# --- CSV import ------------------------------------------------------------
+
+
+class ImportMapping(BaseModel):
+    amount_shape: Literal["signed", "debit_credit", "amount_type"] = "signed"
+    date_col: int | None = None
+    payee_col: int | None = None
+    memo_col: int | None = None
+    amount_col: int | None = None
+    debit_col: int | None = None
+    credit_col: int | None = None
+    type_col: int | None = None
+
+
+class ImportPreviewRow(BaseModel):
+    row_index: int
+    date: str | None
+    payee: str
+    amount_cents: int | None
+    memo: str
+    proposed_category_id: int | None = None
+    is_duplicate: bool = False
+    importable: bool = False
+    import_hash: str | None = None
+    warnings: list[str] = []
+
+
+class ImportPreviewResponse(BaseModel):
+    token: str
+    account_id: int
+    delimiter: str
+    has_header: bool
+    columns: list[str]
+    mapping: ImportMapping
+    raw_sample: list[list[str]]
+    rows: list[ImportPreviewRow]
+    warnings: list[str] = []
+
+
+class ImportRemapRequest(BaseModel):
+    token: str
+    mapping: ImportMapping
+
+
+class ImportCommitRow(BaseModel):
+    date: str
+    payee: str
+    amount_cents: int
+    memo: str = ""
+    category_id: int | None = None
+    is_duplicate: bool = False
+
+
+class ImportCommitRequest(BaseModel):
+    token: str
+    rows: list[ImportCommitRow]
+    skip_duplicates: bool = True
+
+
+class ImportCommitResponse(BaseModel):
+    imported: int
+    skipped_duplicate: int
+    failed: int
+
+
+# --- Rules -----------------------------------------------------------------
+
+
+class RuleReorderRequest(BaseModel):
+    rule_ids: list[int]
+
+
+class RuleApplyResponse(BaseModel):
+    changed: int

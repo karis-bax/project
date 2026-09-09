@@ -230,3 +230,62 @@ export interface MonthBudget {
   available_cents: number
   left_to_assign_cents: number
 }
+
+// --- CSV import ------------------------------------------------------------
+
+export type AmountShape = 'signed' | 'debit_credit' | 'amount_type'
+
+export interface ImportMapping {
+  amount_shape: AmountShape
+  date_col: number | null
+  payee_col: number | null
+  memo_col: number | null
+  amount_col: number | null
+  debit_col: number | null
+  credit_col: number | null
+  type_col: number | null
+}
+
+export interface ImportPreviewRow {
+  row_index: number
+  date: string | null
+  payee: string
+  amount_cents: number | null
+  memo: string
+  proposed_category_id: number | null
+  is_duplicate: boolean
+  importable: boolean
+  import_hash: string | null
+  warnings: string[]
+}
+
+export interface ImportPreviewResponse {
+  token: string
+  account_id: number
+  delimiter: string
+  has_header: boolean
+  columns: string[]
+  mapping: ImportMapping
+  raw_sample: string[][]
+  rows: ImportPreviewRow[]
+  warnings: string[]
+}
+
+export interface ImportCommitRow {
+  date: string
+  payee: string
+  amount_cents: number
+  memo: string
+  category_id: number | null
+  is_duplicate: boolean
+}
+
+export interface ImportCommitResponse {
+  imported: number
+  skipped_duplicate: number
+  failed: number
+}
+
+export interface RuleApplyResponse {
+  changed: number
+}
