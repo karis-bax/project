@@ -93,6 +93,7 @@ def _run_to_schema(run: SyncRun) -> schemas.SyncRunRead:
         accounts_synced=run.accounts_synced,
         added=run.added,
         updated=run.updated,
+        swept_count=run.swept_count,
         errors=run.errors or [],
     )
 

@@ -16,3 +16,15 @@ migrate:
 # Seed the database with sample data.
 seed:
     cd backend && uv run python -m app.seed
+
+# Create an encrypted, off-host-decryptable database backup.
+backup:
+    cd backend && uv run python scripts/backup.py
+
+# Prove the latest backup restores (integrity + row-count comparison).
+restore-drill:
+    cd backend && uv run python scripts/restore_drill.py
+
+# Hard-delete transactions soft-deleted more than 90 days ago.
+purge:
+    cd backend && uv run python scripts/purge_soft_deleted.py

@@ -109,6 +109,7 @@ export function Register({
   editingId,
   onActivate,
   onCloseEdit,
+  onDeleted,
   emptyState,
 }: {
   items: TransactionWithRelations[]
@@ -120,6 +121,7 @@ export function Register({
   editingId: number | null
   onActivate: (id: number, index: number, mods: ActivateModifiers) => void
   onCloseEdit: () => void
+  onDeleted?: (id: number, payee: string) => void
   emptyState: ReactNode
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -193,6 +195,7 @@ export function Register({
                     transaction={txn}
                     payees={payees}
                     onClose={onCloseEdit}
+                    onDeleted={onDeleted}
                   />
                 ) : (
                   <DisplayRow

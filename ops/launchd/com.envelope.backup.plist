@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.envelope.backup</string>
+
+  <!-- Adjust the path to your checkout and to `just`/uv. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/just</string>
+    <string>backup</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/YOU/envelope</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>BACKUP_AGE_RECIPIENT</key>
+    <string>age1yourrecipientpublickey</string>
+    <key>BACKUP_DEST</key>
+    <string>s3</string>
+    <key>BACKUP_S3_BUCKET</key>
+    <string>envelope-backups</string>
+    <key>BACKUP_S3_ENDPOINT_URL</key>
+    <string>https://s3.us-west-002.backblazeb2.com</string>
+  </dict>
+
+  <!-- Daily at 02:30. A sleeping Mac runs the missed job on wake. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>2</integer>
+    <key>Minute</key><integer>30</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/YOU/Library/Logs/envelope-backup.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOU/Library/Logs/envelope-backup.err.log</string>
+</dict>
+</plist>
