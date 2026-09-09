@@ -63,6 +63,9 @@ class CategoryView:
     assigned_cents: int
     activity_cents: int
     available_cents: int
+    # Unsettled pending authorizations — shown as a secondary figure, never
+    # folded into activity/available.
+    pending_cents: int = 0
 
 
 @dataclass(frozen=True)
@@ -73,6 +76,7 @@ class GroupView:
     assigned_cents: int
     activity_cents: int
     available_cents: int
+    pending_cents: int = 0
 
 
 @dataclass(frozen=True)
@@ -84,6 +88,7 @@ class MonthView:
     activity_cents: int
     available_cents: int
     left_to_assign_cents: int
+    pending_cents: int = 0
 
 
 # --- Month string helpers --------------------------------------------------
@@ -147,10 +152,29 @@ def _activity_by_month_category(db: Session, upto: str) -> dict[tuple[str, int],
     rows = db.execute(
         select(month, Transaction.category_id, func.sum(Transaction.amount_cents))
         .where(Transaction.category_id.is_not(None))
+        # Pending authorizations are not settled money and never move the budget.
+        .where(Transaction.pending.is_(False))
         .where(month <= upto)
         .group_by(month, Transaction.category_id)
     ).all()
     return {(row[0], row[1]): int(row[2]) for row in rows}
+
+
+def _pending_by_category_for_month(db: Session, month: str) -> dict[int, int]:
+    """Sum of pending (unsettled) amounts per category for a single month.
+
+    Shown in the UI as a secondary figure — never folded into activity/available.
+    """
+
+    txn_month = _txn_month()
+    rows = db.execute(
+        select(Transaction.category_id, func.sum(Transaction.amount_cents))
+        .where(Transaction.category_id.is_not(None))
+        .where(Transaction.pending.is_(True))
+        .where(txn_month == month)
+        .group_by(Transaction.category_id)
+    ).all()
+    return {row[0]: int(row[1]) for row in rows}
 
 
 def _assigned_by_month_category(db: Session, upto: str) -> dict[tuple[str, int], int]:
@@ -168,6 +192,8 @@ def _income_by_month(db: Session, upto: str) -> dict[str, int]:
         select(month, func.sum(Transaction.amount_cents))
         .where(Transaction.category_id.is_(None))
         .where(Transaction.amount_cents > 0)
+        # Pending inflow is not settled income and never moves left-to-assign.
+        .where(Transaction.pending.is_(False))
         .where(month <= upto)
         .group_by(month)
     ).all()
@@ -183,6 +209,7 @@ def activity(db: Session, category: Category, month: str) -> int:
     total = db.scalar(
         select(func.coalesce(func.sum(Transaction.amount_cents), 0))
         .where(Transaction.category_id == category.id)
+        .where(Transaction.pending.is_(False))
         .where(_txn_month() == month)
     )
     return int(total or 0)
@@ -206,6 +233,7 @@ def income(db: Session, month: str) -> int:
         select(func.coalesce(func.sum(Transaction.amount_cents), 0))
         .where(Transaction.category_id.is_(None))
         .where(Transaction.amount_cents > 0)
+        .where(Transaction.pending.is_(False))
         .where(_txn_month() == month)
     )
     return int(total or 0)
@@ -273,6 +301,7 @@ def month_view(db: Session, month: str) -> MonthView:
     activity_map = _activity_by_month_category(db, month)
     assigned_map = _assigned_by_month_category(db, month)
     income_map = _income_by_month(db, month)
+    pending_map = _pending_by_category_for_month(db, month)
 
     assigned_totals: dict[str, int] = {}
     for (m, _cat_id), amount in assigned_map.items():
@@ -293,19 +322,20 @@ def month_view(db: Session, month: str) -> MonthView:
         cats_by_group.setdefault(cat.group_id, []).append(cat)
 
     group_views: list[GroupView] = []
-    total_assigned = total_activity = total_available = 0
+    total_assigned = total_activity = total_available = total_pending = 0
     for group in groups:
         cat_views: list[CategoryView] = []
-        g_assigned = g_activity = g_available = 0
+        g_assigned = g_activity = g_available = g_pending = 0
         for cat in cats_by_group.get(group.id, []):
             c_assigned = assigned_map.get((month, cat.id), 0)
             c_activity = activity_map.get((month, cat.id), 0)
             c_available = available_by_cat[cat.id]
+            c_pending = pending_map.get(cat.id, 0)
             # Archived categories only surface in months where they had real
             # activity or an allocation (see the module docstring). This keeps a
             # since-archived category in the months it actually mattered without
             # letting an emptied one linger in the current/future months.
-            if cat.archived and c_assigned == 0 and c_activity == 0:
+            if cat.archived and c_assigned == 0 and c_activity == 0 and c_pending == 0:
                 continue
             cat_views.append(
                 CategoryView(
@@ -314,11 +344,13 @@ def month_view(db: Session, month: str) -> MonthView:
                     assigned_cents=c_assigned,
                     activity_cents=c_activity,
                     available_cents=c_available,
+                    pending_cents=c_pending,
                 )
             )
             g_assigned += c_assigned
             g_activity += c_activity
             g_available += c_available
+            g_pending += c_pending
         group_views.append(
             GroupView(
                 id=group.id,
@@ -327,11 +359,13 @@ def month_view(db: Session, month: str) -> MonthView:
                 assigned_cents=g_assigned,
                 activity_cents=g_activity,
                 available_cents=g_available,
+                pending_cents=g_pending,
             )
         )
         total_assigned += g_assigned
         total_activity += g_activity
         total_available += g_available
+        total_pending += g_pending
 
     month_income = income_map.get(month, 0)
     lta = sum(
@@ -346,4 +380,5 @@ def month_view(db: Session, month: str) -> MonthView:
         activity_cents=total_activity,
         available_cents=total_available,
         left_to_assign_cents=lta,
+        pending_cents=total_pending,
     )

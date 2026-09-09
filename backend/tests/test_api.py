@@ -244,6 +244,36 @@ def test_transactions_bad_month_is_422(client: TestClient) -> None:
     assert client.get("/api/transactions?month=2026-13").status_code == 422
 
 
+def test_transactions_pending_filter(client: TestClient, session: Session) -> None:
+    account, _group, category = seed_basics(session)
+    session.add_all(
+        [
+            Transaction(
+                account_id=account.id,
+                category_id=category.id,
+                date=date(2026, 1, 3),
+                payee="Shell",
+                amount_cents=-4000,
+                pending=True,
+            ),
+            Transaction(
+                account_id=account.id,
+                category_id=category.id,
+                date=date(2026, 1, 4),
+                payee="Publix",
+                amount_cents=-5000,
+                pending=False,
+            ),
+        ]
+    )
+    session.commit()
+
+    pending = client.get("/api/transactions?pending=true").json()["items"]
+    assert [t["payee"] for t in pending] == ["Shell"]
+    assert all(t["pending"] for t in pending)
+    assert client.get("/api/transactions/count?pending=true").json() == {"count": 1}
+
+
 def test_transactions_count_and_uncategorized(
     client: TestClient, session: Session
 ) -> None:

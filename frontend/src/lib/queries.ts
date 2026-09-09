@@ -62,6 +62,7 @@ export interface TransactionFilters {
   category_id?: number
   q?: string
   uncategorized?: boolean
+  pending?: boolean
   limit?: number
 }
 

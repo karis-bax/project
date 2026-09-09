@@ -61,6 +61,7 @@ def _apply_filters(
     category_id: int | None,
     q: str | None,
     uncategorized: bool | None,
+    pending: bool | None = None,
 ):
     if month is not None:
         validate_month(month)
@@ -71,6 +72,8 @@ def _apply_filters(
         stmt = stmt.where(Transaction.category_id == category_id)
     if uncategorized:
         stmt = stmt.where(Transaction.category_id.is_(None))
+    if pending is not None:
+        stmt = stmt.where(Transaction.pending.is_(pending))
     if q:
         pattern = f"%{q}%"
         stmt = stmt.where(
@@ -86,6 +89,7 @@ def count_transactions(
     category_id: int | None = None,
     q: str | None = None,
     uncategorized: bool | None = None,
+    pending: bool | None = None,
     db: Session = Depends(get_db),
 ) -> schemas.CountResponse:
     stmt = _apply_filters(
@@ -95,6 +99,7 @@ def count_transactions(
         category_id=category_id,
         q=q,
         uncategorized=uncategorized,
+        pending=pending,
     )
     return schemas.CountResponse(count=int(db.scalar(stmt) or 0))
 
@@ -138,6 +143,7 @@ def list_transactions(
     category_id: int | None = None,
     q: str | None = None,
     uncategorized: bool | None = None,
+    pending: bool | None = None,
     limit: int = Query(100, ge=1, le=500),
     cursor: str | None = None,
     db: Session = Depends(get_db),
@@ -153,6 +159,7 @@ def list_transactions(
         category_id=category_id,
         q=q,
         uncategorized=uncategorized,
+        pending=pending,
     )
 
     if cursor is not None:

@@ -78,6 +78,7 @@ export interface TransactionBase {
   amount_cents: number
   memo: string
   cleared: boolean
+  pending: boolean
   import_hash: string | null
 }
 
@@ -210,6 +211,7 @@ export interface CategoryBudgetRow {
   assigned_cents: number
   activity_cents: number
   available_cents: number
+  pending_cents: number
 }
 
 export interface GroupBudget {
@@ -219,6 +221,7 @@ export interface GroupBudget {
   assigned_cents: number
   activity_cents: number
   available_cents: number
+  pending_cents: number
 }
 
 export interface MonthBudget {
@@ -229,6 +232,7 @@ export interface MonthBudget {
   activity_cents: number
   available_cents: number
   left_to_assign_cents: number
+  pending_cents: number
 }
 
 // --- CSV import ------------------------------------------------------------

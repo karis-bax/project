@@ -99,6 +99,7 @@ class TransactionBase(BaseModel):
     amount_cents: int
     memo: str = ""
     cleared: bool = False
+    pending: bool = False
     import_hash: str | None = None
 
 
@@ -244,6 +245,7 @@ class CategoryBudgetRow(ORMModel):
     assigned_cents: int
     activity_cents: int
     available_cents: int
+    pending_cents: int = 0
 
 
 class GroupBudget(ORMModel):
@@ -253,6 +255,7 @@ class GroupBudget(ORMModel):
     assigned_cents: int
     activity_cents: int
     available_cents: int
+    pending_cents: int = 0
 
 
 class MonthBudget(ORMModel):
@@ -263,6 +266,7 @@ class MonthBudget(ORMModel):
     activity_cents: int
     available_cents: int
     left_to_assign_cents: int
+    pending_cents: int = 0
 
 
 # --- CSV import ------------------------------------------------------------

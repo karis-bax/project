@@ -23,6 +23,7 @@ function readFilters(params: URLSearchParams): TransactionFilters {
   if (categoryId) filters.category_id = Number(categoryId)
   if (q) filters.q = q
   if (params.get('uncategorized') === 'true') filters.uncategorized = true
+  if (params.get('pending') === 'true') filters.pending = true
   return filters
 }
 
@@ -33,6 +34,7 @@ function writeFilters(filters: TransactionFilters): URLSearchParams {
   if (filters.category_id) params.set('category_id', String(filters.category_id))
   if (filters.q) params.set('q', filters.q)
   if (filters.uncategorized) params.set('uncategorized', 'true')
+  if (filters.pending) params.set('pending', 'true')
   return params
 }
 

@@ -59,13 +59,20 @@ function DisplayRow({
       }}
       className={`grid cursor-pointer items-center gap-2 border-b border-[var(--border)] px-3 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)] ${
         selected ? 'bg-[var(--accent-weak)]' : 'hover:bg-[var(--row-hover)]'
-      }`}
+      } ${txn.pending ? 'italic text-[var(--fg-muted)]' : ''}`}
       style={{ gridTemplateColumns: REGISTER_COLS }}
     >
       <span className="num tabular-nums text-[var(--fg-muted)]">
         {formatShortDate(txn.date)}
       </span>
-      <span className="truncate text-[var(--fg)]">{txn.payee}</span>
+      <span className="truncate text-[var(--fg)]">
+        {txn.payee}
+        {txn.pending && (
+          <span className="ml-1.5 rounded bg-[var(--border)] px-1 text-[10px] not-italic uppercase text-[var(--fg-muted)]">
+            pending
+          </span>
+        )}
+      </span>
       <span className="truncate">
         {txn.category ? (
           <span className="text-[var(--fg-muted)]">{txn.category.name}</span>

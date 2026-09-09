@@ -79,6 +79,7 @@ export function QuickAddRow() {
         amount_cents: amountCents,
         memo: draft.memo.trim(),
         cleared: false,
+        pending: false,
         import_hash: null,
       },
       {
